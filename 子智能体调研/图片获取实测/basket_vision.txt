@@ -1,0 +1,35 @@
+The user asks me to verify based only on visible content in the image: Is this a real woven basket? Can straps, attachment points, and carrying method be seen? Can the weaving material be confirmed as bamboo? Answer each item with 明确可见/不清楚/不可确认 (clearly visible/unclear/not confirmable), and evaluate structural clarity. Don't guess from filename.
+
+Let me analyze the image:
+
+1. Is it a real woven basket (physical object)? The image shows what appears to be a physical woven basket photographed against a light blue background, likely in a museum display. There's a shadow beneath it, indicating a 3D physical object. The weaving pattern is clearly visible - herringbone/twill weave pattern. So: 明确可见 - it's a real physical woven container/basket.
+
+2. Straps (背负绑带): There is a twisted rope/cord visible on the left side going from the top of the basket down, and on the right side there's a twisted rope with a loop/knot at the bottom. These appear to be cords/ropes attached to the basket. They look like carrying straps/ropes. Are they "背负绑带" (back-carrying straps)? The ropes are visible, twisted fiber ropes. Whether they're specifically for carrying on the back - the attachment points suggest carrying straps, but the exact carrying method (back carry vs shoulder carry vs hand carry) cannot be definitively confirmed from the single image. So: straps themselves - 可见 (ropes visible), attachment points - visible (the rope connects at upper left corner and right side with loops tied), but 背负方式 (carrying method) - 不可确认/不清楚 because we only see one side view and can't confirm how it was worn.
+
+3. Material confirmation as bamboo: The weave appears to be flat strips of plant material, with lighter yellowish strips visible at rim/binding areas. The color and luster are consistent with bamboo, but from visual alone, confirming it's specifically bamboo (vs rattan, willow, other plant fibers) is not definitively possible. However, the flat rigid strips with the visible grain... Strictly, material identification to species level is 不可确认 from image alone; we can say it's consistent with bamboo/rattan-like plant strips. The user asks "编织材料能否确认为竹?" - Answer: 不可确认 (cannot be confirmed as bamboo definitively), only that it's plant fiber strips consistent with bamboo appearance.
+
+Let me be careful and detailed:
+
+- 实物性: The basket appears as a physical object with shadow, 3D form, museum-style display. 明确可见 (real physical woven basket).
+
+- 编织结构: Clearly visible herringbone twill weave, rim binding with wrapped stitches, lid/collar section separated by a band. 明确可见.
+
+- 绑带: Left side: a twisted cord runs from upper left corner down along the body. Right side: a twisted rope attached at mid-right, hanging down with a loop and knot at the end. So straps/ropes exist. But are these "背负绑带" specifically? They appear to be suspension cords. I'd say: 绑带（绳索）明确可见，但是否为"背负"绑带不完全确定；固定连接点（绳与篓体连接处）可见——上左角和右侧中部的连接圈。背负方式（背、挎、提）不可确认——只有正面照片，无法确定穿戴方式。
+
+- 固定连接点: Visible - the rope attaches via loops at the upper left corner and right side; also horizontal bands with stitching may serve as structural reinforcement. The connection of the cord to the basket body is visible on both sides. 明确可见 (连接点可见), but whether they connect around to form a harness is unclear.
+
+- 背负方式: 不可确认 - single view, ropes' full path not visible, no human context.
+
+- 材料 = 竹: 不可确认。可见为植物篾条（扁平条状、有光泽），与竹篾外观一致，但无法排除藤、柳等其他植物材料；需实物或标签确认。
+
+- 结构清晰度评价: Overall high clarity - weave pattern, rim binding, lid/body separation, vertical reinforcing strips (the light-colored vertical splints), cords all clearly discernible. The image is high resolution, front view, good lighting. Structural clarity: 高/清晰。Some parts: the bottom edge, back side, interior not visible; the left rope's upper attachment partially clear. Overall assessment: 结构建位清晰度高，编织纹理、口沿锁边、束带连接点均可辨认；但侧面/背面结构、内部结构不可见。
+
+Format: 逐项回答，明确可见/不清楚/不可确认。
+
+Item 1: 是否真实编织背篓实物? — 明确可见（实物照片特征：投影、立体形态、博物馆浅蓝背景）。是真实施编织容器实物。Note: "背篓" designation - it's a basket-shaped container; whether it's specifically a backpack basket (背篓) depends on straps - ropes visible suggest carrying. I can say 实物为真，编织篮筐实物明确可见。
+
+Item 2: 背负绑带 — 可见绳索/绳带（左右两侧均有拧制绳），明确可见的是"绳带"，但其是否专用于背负属推断; 连接点明确可见（左上角系结、右侧中部环扣及末端打结绳圈）; 背负方式不可确认（单张正面照，无法判断背/挎/提及完整绳路）。
+
+Item 3: 材料=竹? — 不可确认。可见扁平植物篾条，光泽与色泽与竹篾相符，但仅凭图像无法确证为竹（藤/柳条等外观相近）；边缘露出浅色篾条断面亦仅支持"植物茎皮/篾条"。
+
+结构清晰度: 高。编织纹样（人字纹/斜纹）、口沿缠边缝合、上下两段结构（带盖/领圈）、纵向加固篾条、绳索走向均清晰可辨；不足：背面、底部、内部

@@ -1,0 +1,7 @@
+[Desktop Entry]
+Type=Service
+ServiceTypes=Krita/PythonPlugin
+X-KDE-Library=krita_cowork
+X-Krita-Manual=
+Name=Cowork Bridge
+Comment=Krita × ComfyUI × 智能体 复合工作台控制服务(127.0.0.1:51080)

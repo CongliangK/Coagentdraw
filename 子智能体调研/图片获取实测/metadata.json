@@ -1,0 +1,35 @@
+[
+  {
+    "file": "yesa_painting_original.png",
+    "dimensions": [
+      585,
+      438
+    ],
+    "format": "PNG",
+    "mode": "RGBA",
+    "bytes": 644666,
+    "sha256": "2f57170bde4b3c57b0015ed533585d8832e958fb4c6530fe4ef98cd8b7c66e38"
+  },
+  {
+    "file": "basket_original.jpg",
+    "dimensions": [
+      3551,
+      4614
+    ],
+    "format": "JPEG",
+    "mode": "RGB",
+    "bytes": 8713109,
+    "sha256": "29302b49c419b203e8d89493bcc3b3d9b5f9bc6c4931a675ec8cd9b4da1a27e6"
+  },
+  {
+    "file": "starry_night_3840.jpg",
+    "dimensions": [
+      3840,
+      3041
+    ],
+    "format": "JPEG",
+    "mode": "RGB",
+    "bytes": 5545153,
+    "sha256": "bbd4df2538ef9e7e34ea9f415ec4f60c4007a841cb757f7d1f94da42910e0103"
+  }
+]

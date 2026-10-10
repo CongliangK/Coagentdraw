@@ -1,0 +1,43 @@
+# Python 缓存与本地虚拟环境
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# 系统、编辑器临时文件
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
+*.tmp
+*.log
+
+# Krita 自动保存与备份
+*.kra~
+*.kra-autosave
+*.kra-autosave.kra
+.*.kra-autosave.kra
+
+# 绘画源文件仅保留在本地工作区，不进入公开仓库
+*.kra
+
+# 调研实测的第三方图片仅保留本地，不入公开仓库（不做全局图片忽略）
+子智能体调研/图片获取实测/*.png
+子智能体调研/图片获取实测/*.jpg
+
+# 本地环境与凭据
+.env
+.env.*
+!.env.example
+!.env.sample
+*.pem
+*.key
+
+# 可再生成的缓存
+cowork_cache/
