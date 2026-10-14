@@ -1,0 +1,21 @@
+{
+  "unet": {"class_type": "UNETLoader", "inputs": {"unet_name": "qwen_image_2.1_int8_convrot.safetensors", "weight_dtype": "default"}},
+  "cache": {"class_type": "QwenImage21Cache", "inputs": {"model": ["unet", 0], "device": "auto", "dtype": "default"}},
+  "clip": {"class_type": "CLIPLoader", "inputs": {"clip_name": "qwen3vl_8b_int8_convrot.safetensors", "type": "qwen_image", "device": "default"}},
+  "vae": {"class_type": "VAELoader", "inputs": {"vae_name": "qwen_image_2.1_vae_bf16.safetensors"}},
+  "encode": {"class_type": "TextEncodeQwenImage21", "inputs": {
+    "clip": ["clip", 0],
+    "prompt": "A neon shop sign that reads \"QWEN IMAGE 2.1\", rainy night, reflections on wet pavement, cinematic photography",
+    "negative_prompt": "",
+    "vae": ["vae", 0],
+    "resolution": 1024
+  }},
+  "latent": {"class_type": "EmptyLatentImage", "inputs": {"width": 1328, "height": 1328, "batch_size": 1}},
+  "sampler": {"class_type": "KSampler", "inputs": {
+    "model": ["cache", 0], "seed": 42, "steps": 25, "cfg": 1.0,
+    "sampler_name": "euler", "scheduler": "simple", "denoise": 1.0,
+    "positive": ["encode", 0], "negative": ["encode", 1], "latent_image": ["latent", 0]
+  }},
+  "decode": {"class_type": "VAEDecode", "inputs": {"samples": ["sampler", 0], "vae": ["vae", 0]}},
+  "save": {"class_type": "SaveImage", "inputs": {"images": ["decode", 0], "filename_prefix": "qwen21_t2i"}}
+}

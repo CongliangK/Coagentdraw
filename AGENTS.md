@@ -2,19 +2,16 @@
 
 ## 项目定位
 
-本仓库是 Krita × ComfyUI × 智能体的复合绘画工作台，同时保存角色设计方法论、研究资料与绘画源文件。默认使用中文沟通和撰写文档。
+本仓库是 Krita × ComfyUI × 智能体的复合绘画工作台。公开仓库只包含内核程序（`core/`）、设计工作流文档（`design/`）与 ComfyUI 工作流（`comfyui/`）；绘画源文件、原始调研素材与子智能体调研保留在本地 `_本地暂存/`，不入库。默认使用中文沟通和撰写文档。
 
 开始任务前阅读 [README.md](<README.md>)，检查 `git status --short`，区分已有变更和本次任务的改动；不得覆盖用户未提交的工作。
 
 ## 目录与职责
 
-- [krita_cowork](<krita_cowork/>)：Krita 进程内插件；[bridge_qt.py](<krita_cowork/bridge_qt.py>) 负责主线程桥接，[server.py](<krita_cowork/server.py>) 负责 HTTP 控制面，[ops.py](<krita_cowork/ops.py>) 负责文档与图层操作。
-- [cwb.py](<cwb.py>)：命令行客户端，连接 Krita 与 ComfyUI。
-- [install.sh](<install.sh>) 与 [插件注册文件](<kritapykrita_krita_cowork.desktop>)：本机安装和启用配置。
-- [角色设计链路调研](<角色设计链路调研/>)、[子智能体调研](<子智能体调研/>)：研究记录、参考素材与能力实测。
-- [角色设计八阶段工作规范_审核初稿.md](<角色设计八阶段工作规范_审核初稿.md>)：八阶段流程的审核初稿，不代表已经获得用户最终批准。
-- [阶段一_角色意图卡_模板.md](<阶段一_角色意图卡_模板.md>)：角色意图卡模板。
-- 根目录 `.kra`：绘画源文件，不是可随意清理的构建产物；仅保留在本地工作区，不入公开仓库。
+- [core/](<core/>)：内核程序。[krita_cowork](<core/krita_cowork/>) 为 Krita 进程内插件：[bridge_qt.py](<core/krita_cowork/bridge_qt.py>) 负责主线程桥接，[server.py](<core/krita_cowork/server.py>) 负责 HTTP 控制面，[ops.py](<core/krita_cowork/ops.py>) 负责文档与图层操作；[cwb.py](<core/cwb.py>) 为连接 Krita 与 ComfyUI 的命令行客户端；[install.sh](<core/install.sh>) 与[插件注册文件](<core/kritapykrita_krita_cowork.desktop>) 负责本机安装和启用配置。
+- [design/](<design/>)：设计工作流文档。[八阶段工作规范审核初稿](<design/角色设计八阶段工作规范_审核初稿.md>)（不代表已经获得用户最终批准）、[意图卡模板](<design/阶段一_角色意图卡_模板.md>) 与[调研报告](<design/调研报告/README.md>)。
+- [comfyui/](<comfyui/>)：ComfyUI 工作流（API 格式 JSON）与依赖说明。
+- `_本地暂存/`：不入库的本地资料——绘画源文件（`.kra`）、角色设计调研原始素材、子智能体调研全部实测记录与图片。已被 `.gitignore` 排除，不是可随意清理的目录。
 
 ## 代码与运行约束
 
@@ -22,7 +19,7 @@
 2. Krita API 调用必须通过主线程桥接执行，不得从 HTTP 工作线程直接调用。保留超时保护与服务退出机制。
 3. Krita 控制面只监听 `127.0.0.1:51080`；ComfyUI 默认使用 `127.0.0.1:8188`。未获授权不得暴露到公网或改变网络安全边界。
 4. 保留 RGBA / U8、像素格式和图层树挂载顺序等既有兼容性守卫。修改 API 时同步核对客户端与说明文档。
-5. 客户端当前包含本机专用的工作流目录。使用前核实路径和模型/工作流可用性，不把机器相关路径当作跨环境通用配置。
+5. 客户端工作流目录默认是仓库内 [comfyui/](<comfyui/>)，可用 `CWB_WF_DIR` 环境变量覆盖。使用前核实依赖模型/工作流可用性，不把机器相关路径当作跨环境通用配置。
 6. 安装脚本会修改仓库外的 Krita 插件与用户配置。仅在任务明确需要安装时执行；不得为静态验证自动安装、重启 Krita 或覆盖配置。
 
 ## 绘画与资料规范
@@ -41,18 +38,18 @@
 python3 - <<'PY'
 import ast
 from pathlib import Path
-paths = [Path('cwb.py'), *sorted(Path('krita_cowork').glob('*.py'))]
+paths = [Path('core/cwb.py'), *sorted(Path('core/krita_cowork').glob('*.py'))]
 for path in paths:
     ast.parse(path.read_text(encoding='utf-8'), filename=str(path))
 print(f'Python syntax OK: {len(paths)} files')
 PY
-bash -n install.sh
+bash -n core/install.sh
 git diff --check
 ```
 
 涉及插件功能的变更，在服务可用且用户授权范围允许时再验证 `ping`、文档列表和图层列表；保存或写图层的测试使用专用测试文档，不修改用户正在工作的作品。静态检查不等于运行验证，汇报时注明未验证部分。
 
-注意：客户端在参数解析前会创建本机缓存目录，所以 `python3 cwb.py --help` 不是完全无副作用的检查。
+注意：客户端在参数解析前会创建本机缓存目录，所以 `python3 core/cwb.py --help` 不是完全无副作用的检查。
 
 ## Git 约定
 

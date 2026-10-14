@@ -22,7 +22,9 @@ import urllib.request
 
 Krita = "http://127.0.0.1:51080"
 Comfy = "http://127.0.0.1:8188"
-WF_DIR = os.environ.get("CWB_WF_DIR", os.path.expanduser("~/AI/qwen-image-2.1"))
+_HERE = os.path.dirname(os.path.abspath(__file__))
+WF_DIR = os.environ.get("CWB_WF_DIR",
+                        os.path.normpath(os.path.join(_HERE, os.pardir, "comfyui")))
 WORKDIR = os.path.join(WF_DIR, "cowork_cache")
 
 

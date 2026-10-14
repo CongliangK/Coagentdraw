@@ -1,0 +1,122 @@
+{
+ "unet": {
+  "class_type": "UNETLoader",
+  "inputs": {
+   "unet_name": "qwen_image_2.1_int8_convrot.safetensors",
+   "weight_dtype": "default"
+  }
+ },
+ "cache": {
+  "class_type": "QwenImage21Cache",
+  "inputs": {
+   "model": [
+    "unet",
+    0
+   ],
+   "device": "auto",
+   "dtype": "default"
+  }
+ },
+ "clip": {
+  "class_type": "CLIPLoader",
+  "inputs": {
+   "clip_name": "qwen3vl_8b_int8_convrot.safetensors",
+   "type": "qwen_image",
+   "device": "default"
+  }
+ },
+ "vae": {
+  "class_type": "VAELoader",
+  "inputs": {
+   "vae_name": "qwen_image_2.1_vae_bf16.safetensors"
+  }
+ },
+ "load1": {
+  "class_type": "LoadImage",
+  "inputs": {
+   "image": "portrait_model_denim.png"
+  }
+ },
+ "load2": {
+  "class_type": "LoadImage",
+  "inputs": {
+   "image": "clothing_light_blue_denim_shirt.png"
+  }
+ },
+ "encode": {
+  "class_type": "TextEncodeQwenImage21",
+  "inputs": {
+   "clip": [
+    "clip",
+    0
+   ],
+   "prompt": "Change the outfit of the woman in <image1> to the light blue denim shirt shown in <image2>. Keep her face, hairstyle, pose and the background unchanged.",
+   "negative_prompt": "",
+   "vae": [
+    "vae",
+    0
+   ],
+   "resolution": 0,
+   "images": {
+    "image_1": [
+     "load1",
+     0
+    ],
+    "image_2": [
+     "load2",
+     0
+    ]
+   }
+  }
+ },
+ "sampler": {
+  "class_type": "KSampler",
+  "inputs": {
+   "model": [
+    "cache",
+    0
+   ],
+   "seed": 42,
+   "steps": 25,
+   "cfg": 1.0,
+   "sampler_name": "euler",
+   "scheduler": "simple",
+   "denoise": 1.0,
+   "positive": [
+    "encode",
+    0
+   ],
+   "negative": [
+    "encode",
+    1
+   ],
+   "latent_image": [
+    "encode",
+    2
+   ]
+  }
+ },
+ "decode": {
+  "class_type": "VAEDecode",
+  "inputs": {
+   "samples": [
+    "sampler",
+    0
+   ],
+   "vae": [
+    "vae",
+    0
+   ]
+  }
+ },
+ "save": {
+  "class_type": "SaveImage",
+  "inputs": {
+   "images": [
+    "decode",
+    0
+   ],
+   "filename_prefix": "qwen21_edit"
+  }
+ }
+}

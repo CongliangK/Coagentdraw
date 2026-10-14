@@ -14,28 +14,37 @@
 
 - 让 AI 编程助手能够读取仓库上下文，配合公开仓库参与开发；
 - 用 GitHub Issues 驱动开发任务管理；
-- 分享一套「Krita × ComfyUI × 智能体」的协作流程、角色设计方法论与调研记录。
+- 分享一套「Krita × ComfyUI × 智能体」的协作流程、角色设计方法论与调研报告。
 
 文档默认使用中文。交流请直接开 [Issue](https://github.com/CongliangK/Coagentdraw/issues)；暂不接受外部代码贡献，也不承诺按路线图演进。
+
+## 目录结构
+
+| 目录 | 内容 |
+|---|---|
+| [core/](core/) | 内核：Krita 插件 `krita_cowork`、命令行客户端 `cwb.py`、安装脚本 |
+| [design/](design/) | 设计工作流文档：八阶段工作规范、意图卡模板、[调研报告](design/调研报告/README.md) |
+| [comfyui/](comfyui/) | ComfyUI 工作流（Qwen-Image-2.1，API 格式）与依赖模型说明 |
 
 ## 许可证
 
 | 内容 | 许可证 |
 |---|---|
-| 源代码（`krita_cowork/`、`cwb.py`、`install.sh` 等） | [MIT](LICENSE) |
-| 文档、方法论与研究记录 | [CC BY-NC 4.0](LICENSES/CC-BY-NC-4.0.txt)（署名—非商业性使用） |
+| 源代码（`core/`） | [MIT](LICENSE) |
+| 文档、方法论与调研报告（`design/`） | [CC BY-NC 4.0](LICENSES/CC-BY-NC-4.0.txt)（署名—非商业性使用） |
 
-- 调研记录中引用的第三方图片（Wikimedia Commons 公版 / CC0 素材、网页截图）不随仓库分发，版权归原作者 / 上传者所有；来源 URL、校验值与授权信息见[图片获取实测记录](<子智能体调研/图片获取实测/实测记录.md>)等文本记录。
-- 绘画源文件（`.kra`）不包含在本仓库中，仅保留在作者本地。
+- 调研报告中的引用与来源链接仅作研究引用，版权归原作者所有。
+- 绘画源文件（`.kra`）与原始调研素材不包含在本仓库中，仅保留在作者本地。
 
 ## 组件
 
-- `krita_cowork/` Krita 6 插件(Python3.13/PyQt6,仅标准库网络层)
+- `core/krita_cowork/` Krita 6 插件(Python3.13/PyQt6,仅标准库网络层)
   - `bridge_qt.py` 跨线程 marshal(信号→主线程,超时保护)
   - `server.py` HTTP/1.1 JSON 控制面(ThreadingHTTPServer,daemon)
   - `ops.py` 图层原语(RGBA8 守卫、RGBA8888 逐行拷贝、先挂树再写像素)
-- `cwb.py` 智能体/命令行客户端(含 ComfyUI 提交/轮询/取图)
-- `install.sh` 安装到 `~/.local/share/krita/pykrita/` 并在 kritarc `[python]` 写 `enable_krita_cowork=true`。注意：安装脚本会修改仓库外的 Krita 插件与用户配置，仅在明确需要时执行。
+- `core/cwb.py` 智能体/命令行客户端(含 ComfyUI 提交/轮询/取图)
+- `core/install.sh` 安装到 `~/.local/share/krita/pykrita/` 并在 kritarc `[python]` 写 `enable_krita_cowork=true`。注意：安装脚本会修改仓库外的 Krita 插件与用户配置，仅在明确需要时执行。
+- `comfyui/` 工作流定义（`cwb.py` 默认从这里加载）
 
 ## API
 
@@ -50,16 +59,16 @@
 ## cwb 用法
 
 ```bash
-python3 cwb.py ping
-python3 cwb.py new 作品 1328 1328
-python3 cwb.py comfy-t2i "..." --w 1328 --h 832 --add 背景层
-python3 cwb.py comfy-edit base.png "..." --image2 ref.png --add 编辑层
-python3 cwb.py save 作品.kra
+python3 core/cwb.py ping
+python3 core/cwb.py new 作品 1328 1328
+python3 core/cwb.py comfy-t2i "..." --w 1328 --h 832 --add 背景层
+python3 core/cwb.py comfy-edit base.png "..." --image2 ref.png --add 编辑层
+python3 core/cwb.py save 作品.kra
 ```
 
 环境变量：
 
-- `CWB_WF_DIR`：ComfyUI 工作流目录，默认 `~/AI/qwen-image-2.1`。这是本机示例路径，跨环境使用前请先核实工作流与模型可用性。
+- `CWB_WF_DIR`：ComfyUI 工作流目录，默认为仓库内 `comfyui/`。使用前请先核实依赖模型已在 ComfyUI 中就位（见 [comfyui/README.md](comfyui/README.md)）。
 
 ## 已实证要点(Krita 6.0.4 AppImage)
 
