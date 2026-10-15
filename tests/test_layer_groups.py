@@ -30,6 +30,11 @@ class Image:
     def __init__(self, path):
         self.path = path
 
+    @classmethod
+    def fromData(cls, encoded, fmt):
+        assert fmt == 'PNG'
+        return cls('input.png')
+
     def isNull(self):
         return self.path.endswith('bad.png')
 
@@ -144,6 +149,19 @@ class Operations(unittest.TestCase):
         self.active = patch.object(ops, '_active_doc', return_value=self.doc)
         self.active.start()
         self.addCleanup(self.active.stop)
+        # CAD-11 tests use a nonexistent input.png and a Qt image double. Keep
+        # that one virtual path local to these tests; all real paths still run
+        # production preflight (CAD-14 separately tests malformed/resource PNGs).
+        placement = importlib.import_module('_cad11_package.placement')
+        real_prepare = placement.prepare_png
+        def prepare(path, *args, **kwargs):
+            if path == os.path.abspath('input.png'):
+                kwargs.pop('budget', None)
+                return b'virtual PNG fixture', placement.plan_placement(1, 2, *args, **kwargs)
+            return real_prepare(path, *args, **kwargs)
+        self.png_fixture = patch.object(placement, 'prepare_png', side_effect=prepare)
+        self.png_fixture.start()
+        self.addCleanup(self.png_fixture.stop)
 
     def group(self, name='组', **kwargs):
         return ops.layer_group(name, **kwargs)
