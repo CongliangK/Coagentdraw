@@ -80,6 +80,12 @@ def _snapshot(root, relative, destination=None):
     return (digest.hexdigest(), after.st_size, _signature(after))
 
 
+def _remember_snapshot(snapshots, relative, snapshot):
+    """Every source role shares the first observation; later reads may not replace it."""
+    if snapshots.setdefault(relative, snapshot) != snapshot:
+        raise ProjectError("导出期间源文件改变: " + relative)
+
+
 def _file_hash(path):
     with path.open("rb") as stream:
         return hashlib.file_digest(stream, "sha256").hexdigest()
@@ -121,7 +127,9 @@ def export_project(root, output, assets, roles=(), metadata=None, zipped=False):
         raise ProjectError("输出父目录必须已存在")
     if os.path.lexists(output):
         raise FileExistsError(errno.EEXIST, "输出已存在，拒绝覆盖", str(output))
+    snapshots = {}
     data, raw, state_snapshot = _read_json(root, "project_state.json")
+    _remember_snapshot(snapshots, "project_state.json", state_snapshot)
     validate(data)  # consume CAD-19 without changing its schema or implementation
     if not assets or len(assets) != len(set(assets)):
         raise ProjectError("必须显式选择资产，且不能重复")
@@ -147,6 +155,7 @@ def export_project(root, output, assets, roles=(), metadata=None, zipped=False):
     extra, extra_raw, extra_snapshot = {}, None, None
     if metadata is not None:
         extra, extra_raw, extra_snapshot = _read_json(root, metadata)
+        _remember_snapshot(snapshots, metadata, extra_snapshot)
         if (not isinstance(extra, dict) or set(extra) - {"description", "references", "versions"}
                 or not isinstance(extra.get("description", ""), str)
                 or any(not isinstance(extra.get(key, []), list)
@@ -159,9 +168,7 @@ def export_project(root, output, assets, roles=(), metadata=None, zipped=False):
         bundle = stage / "bundle"
         bundle.mkdir()
         (bundle / "project_state.json").write_bytes(raw)
-        snapshots = {"project_state.json": state_snapshot}
         if metadata is not None:
-            snapshots[metadata] = extra_snapshot
             (bundle / "export_metadata.json").write_bytes(extra_raw)
         records, missing_assets, available = [], [], set()
         for entry in sorted(selected, key=lambda e: (e["path"], e["id"])):
@@ -175,10 +182,10 @@ def export_project(root, output, assets, roles=(), metadata=None, zipped=False):
                     target.unlink()
                 missing_assets.append({"id": entry["id"], "path": entry["path"], "reason": "源文件缺失"})
                 continue
+            _remember_snapshot(snapshots, entry["path"], snapshot)
             if (snapshot[:2] != (entry["sha256"], entry["size"])
                     or _file_hash(target) != snapshot[0] or target.stat().st_size != snapshot[1]):
                 raise ProjectError("源资产 hash/size 与登记不符: " + entry["path"])
-            snapshots[entry["path"]] = snapshot
             available.add(entry["id"])
             records.append({"id": entry["id"], "path": "assets/" + entry["path"],
                             "sha256": snapshot[0], "size": snapshot[1], "stage": entry["stage"],

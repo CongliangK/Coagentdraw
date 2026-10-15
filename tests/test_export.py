@@ -84,6 +84,145 @@ class ExportTests(unittest.TestCase):
         self.assertEqual(notes["intent_card"], "意图")
         self.assertIn("未验证", report["verification"])
 
+    def test_static_sidecar_final_and_multiple_roles_share_identical_bytes(self):
+        payload = b'{"description":"shared final metadata","versions":["v1"]}\n'
+        entry = self.asset("notes.json", payload)
+        (self.root / "notes-alias.json").hardlink_to(self.root / "notes.json")
+        before = {p: p.read_bytes() for p in self.root.rglob("*") if p.is_file()}
+        expected = None
+        for metadata in ("notes.json", "notes-alias.json"):
+            for zipped in (False, True):
+                with self.subTest(metadata=metadata, zipped=zipped):
+                    output = self.parent / (metadata + (".zip" if zipped else ".bundle"))
+                    report = export.export_project(
+                        self.root, output, [entry["id"]],
+                        ["design_description=" + entry["id"], "version_record=" + entry["id"]],
+                        metadata=metadata, zipped=zipped)
+                    if zipped:
+                        with zipfile.ZipFile(output) as archive:
+                            contents = {name: archive.read(name) for name in archive.namelist()}
+                    else:
+                        contents = {p.relative_to(output).as_posix(): p.read_bytes()
+                                    for p in output.rglob("*") if p.is_file()}
+                    self.assertEqual(contents["export_metadata.json"], payload)
+                    self.assertEqual(contents["assets/notes.json"], payload)
+                    self.assertEqual(json.loads(contents["design_notes.json"])["notes"], json.loads(payload))
+                    self.assertEqual(report["assets"][0]["roles"], ["design_description", "version_record"])
+                    if expected is None:
+                        expected = contents
+                    self.assertEqual(contents, expected)
+                    self.assertEqual({p: p.read_bytes() for p in before}, before)
+                    self.assertEqual(list(self.parent.glob(".cwb-export-*")), [])
+
+    def test_shared_sidecar_existing_targets_are_preserved(self):
+        entry = self.asset("notes.json", b'{"description":"static shared file"}\n')
+        before = {p: p.read_bytes() for p in self.root.rglob("*") if p.is_file()}
+        sentinel = b"keep old delivery"
+        for zipped in (False, True):
+            with self.subTest(zipped=zipped):
+                output = self.parent / ("existing.zip" if zipped else "existing.bundle")
+                if zipped:
+                    output.write_bytes(sentinel)
+                else:
+                    output.mkdir()
+                    (output / "keep").write_bytes(sentinel)
+                with self.assertRaises(FileExistsError):
+                    export.export_project(self.root, output, [entry["id"]],
+                                          metadata="notes.json", zipped=zipped)
+                self.assertEqual((output if zipped else output / "keep").read_bytes(), sentinel)
+                if not zipped:
+                    self.assertEqual(list(output.iterdir()), [output / "keep"])
+                self.assertEqual({p: p.read_bytes() for p in self.root.rglob("*") if p.is_file()}, before)
+                self.assertEqual(list(self.parent.glob(".cwb-export-*")), [])
+
+    def assert_sidecar_change_rejected(self, same_bytes=False, hardlink=False, selected=True):
+        registered = b'{"description":"registered final B","versions":["v2"]}\n'
+        initial = registered if same_bytes else b'{"description":"dirty metadata A"}\n'
+        entry = self.asset("notes.json", registered)
+        source = self.root / "notes.json"
+        metadata = "notes.json"
+        if hardlink:
+            metadata = "notes-alias.json"
+            (self.root / metadata).hardlink_to(source)
+        original = export._read_json
+        ids = [self.a["id"], entry["id"]] if selected else [self.a["id"]]
+        for zipped in (False, True):
+            with self.subTest(zipped=zipped):
+                self.out = self.parent / ("changed.zip" if zipped else "changed.bundle")
+                source.write_bytes(initial)
+                before = {p: p.read_bytes() for p in self.root.rglob("*") if p.is_file()}
+                def restore_after_read(root, relative):
+                    result = original(root, relative)
+                    if relative == metadata:
+                        source.write_bytes(registered)
+                        # Make same-byte rewrites deterministic even on coarse timestamp filesystems.
+                        timestamp = source.stat()
+                        os.utime(source, ns=(timestamp.st_atime_ns, timestamp.st_mtime_ns + 1_000_000_000))
+                    return result
+                with mock.patch.object(export, "_read_json", side_effect=restore_after_read):
+                    with self.assertRaisesRegex(project.ProjectError, "源文件改变"):
+                        export.export_project(self.root, self.out, ids, metadata=metadata, zipped=zipped)
+                self.assert_clean()
+                before[source] = registered
+                if hardlink:
+                    before[self.root / metadata] = registered
+                self.assertEqual({p: p.read_bytes() for p in before}, before)
+
+    def test_selected_sidecar_restore_during_export_rejected(self):
+        self.assert_sidecar_change_rejected()
+
+    def test_selected_sidecar_same_bytes_rewrite_rejected(self):
+        self.assert_sidecar_change_rejected(same_bytes=True)
+
+    def test_hardlinked_sidecar_restore_during_export_rejected(self):
+        self.assert_sidecar_change_rejected(hardlink=True)
+
+    def test_unselected_sidecar_restore_during_export_rejected(self):
+        self.assert_sidecar_change_rejected(selected=False)
+
+    def test_state_reused_as_sidecar_cannot_replace_first_snapshot(self):
+        state = self.root / project.STATE
+        initial = state.read_bytes()
+        changed = b'{"description":"sidecar replacing state"}\n'
+        original = export._read_json
+        for zipped in (False, True):
+            with self.subTest(zipped=zipped):
+                self.out = self.parent / ("changed.zip" if zipped else "changed.bundle")
+                state.write_bytes(initial)
+                before = {p: p.read_bytes() for p in self.root.rglob("*") if p.is_file()}
+                def replace_after_state_read(root, relative):
+                    result = original(root, relative)
+                    if relative == project.STATE and result[1] == initial:
+                        state.write_bytes(changed)
+                    return result
+                with mock.patch.object(export, "_read_json", side_effect=replace_after_state_read):
+                    with self.assertRaisesRegex(project.ProjectError, "源文件改变"):
+                        self.do_export(metadata=project.STATE, zipped=zipped)
+                self.assert_clean()
+                before[state] = changed
+                self.assertEqual({p: p.read_bytes() for p in before}, before)
+
+    def test_static_state_is_not_a_valid_sidecar(self):
+        for zipped in (False, True):
+            with self.subTest(zipped=zipped):
+                with self.assertRaisesRegex(project.ProjectError, "sidecar 仅接受"):
+                    self.do_export(metadata=project.STATE, zipped=zipped)
+                self.assert_clean()
+
+    def test_state_and_lock_cannot_be_selected_as_final(self):
+        # CAD-19 already forbids these asset paths; keep that schema boundary intact.
+        data = project.read_state(self.root)[0]
+        for relative in (project.STATE, project.LOCK):
+            for zipped in (False, True):
+                with self.subTest(relative=relative, zipped=zipped):
+                    data["assets"][0]["path"] = relative
+                    self.save_state(data)
+                    before = {p: p.read_bytes() for p in self.root.rglob("*") if p.is_file()}
+                    with self.assertRaisesRegex(project.ProjectError, "项目状态与锁文件不能作为作品成果"):
+                        self.do_export(zipped=zipped)
+                    self.assert_clean()
+                    self.assertEqual({p: p.read_bytes() for p in before}, before)
+
     def test_zip_is_deterministic_and_matches_directory(self):
         report = self.do_export()
         z1, z2 = self.parent / "one.zip", self.parent / "two.zip"
