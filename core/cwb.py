@@ -105,11 +105,22 @@ def main(argv=None):
     p.add_argument("--timeout", type=float, default=1800)
 
     add_project_parser(sub)
+    p = sub.add_parser("export-project", help="离线复制明确选定的正式成果，不上传")
+    p.add_argument("root", help="项目根目录")
+    p.add_argument("output", help="尚不存在的目录或 --zip 文件；父目录须存在")
+    p.add_argument("--asset", action="append", required=True, help="明确选择 final 资产 UUID，可重复")
+    p.add_argument("--role", action="append", default=[], metavar="ROLE=UUID",
+                   help="用途：kra/final_png/setting/workflow/design_description/reference_sources/version_record")
+    p.add_argument("--metadata", help="项目内 JSON sidecar：description、references、versions")
+    p.add_argument("--zip", action="store_true", help="仅生成本地 ZIP")
 
     a = ap.parse_args(argv)
     if a.cmd == "project":
         from cwb_project import run as run_project
         run_project(a)
+    elif a.cmd == "export-project":
+        from cwb_export import run as run_export
+        run_export(a)
     elif a.cmd == "ping":
         print(json.dumps(http(Krita + "/ping"), ensure_ascii=False))
     elif a.cmd == "docs":
