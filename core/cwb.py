@@ -68,6 +68,21 @@ def add_project_parser(sub):
 
 
 
+def add_stage_parser(sub):
+    parser = sub.add_parser("stage", help="八阶段组预设（独立身份 sidecar；不修改项目状态）")
+    commands = parser.add_subparsers(dest="stage_cmd", required=True)
+    for command in ("setup", "import-diagnostic", "status"):
+        p = commands.add_parser(command)
+        p.add_argument("--state", required=True, help="独立 *.cwb-stage.json 文件；保留并备份")
+        if command == "setup":
+            p.add_argument("number", type=int, choices=range(1, 9))
+        if command != "status":
+            p.add_argument("--document", required=True, help="已保存的活动 .kra 绝对或相对路径")
+        if command == "import-diagnostic":
+            p.add_argument("png", help="显式提供 #18 已有 PNG；不生成诊断图")
+            p.add_argument("--name", default="诊断 PNG")
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -121,6 +136,7 @@ def main(argv=None):
     p.add_argument("--timeout", type=float, default=1800)
 
     add_project_parser(sub)
+    add_stage_parser(sub)
     p = sub.add_parser("export-project", help="离线复制明确选定的正式成果，不上传")
     p.add_argument("root", help="项目根目录")
     p.add_argument("output", help="尚不存在的目录或 --zip 文件；父目录须存在")
@@ -131,7 +147,10 @@ def main(argv=None):
     p.add_argument("--zip", action="store_true", help="仅生成本地 ZIP")
 
     a = ap.parse_args(argv)
-    if a.cmd == "project":
+    if a.cmd == "stage":
+        from cwb_stage import run as run_stage
+        run_stage(a, http, Krita)
+    elif a.cmd == "project":
         from cwb_project import run as run_project
         run_project(a)
     elif a.cmd == "export-project":
