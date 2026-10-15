@@ -114,6 +114,37 @@ def add_compare_parser(sub):
     p.add_argument("--expect-sequence", type=int, required=True, help="show 返回的事件序号（首次为 0）")
 
 
+def add_style_parser(sub):
+    parser = sub.add_parser("style", help="离线版本化风格 sidecar/提示/标杆比较；不生成、不写项目主状态")
+    commands = parser.add_subparsers(dest="style_cmd", required=True)
+    for command in ("init", "show", "edit", "state", "prompt", "compare"):
+        p = commands.add_parser(command)
+        p.add_argument("root", help="已有 CAD-19 项目目录；固定独立 style_tokens.cwb sidecar")
+        if command in ("init", "edit", "state"):
+            p.add_argument("--actor", required=True, help="人工记录操作者；不验证身份")
+            p.add_argument("--reason", required=True)
+        if command in ("edit", "state"):
+            p.add_argument("--expect-revision", type=int, required=True)
+        if command == "edit":
+            p.add_argument("--config", required=True, help="完整 JSON 配置；未知字段/删除/锁定修改拒绝")
+        elif command == "state":
+            p.add_argument("kind", choices=("references", "style_tokens"))
+            p.add_argument("id")
+            p.add_argument("action", choices=("lock", "unlock", "cancel", "enable"))
+        if command in ("prompt", "compare"):
+            p.add_argument("--scope", required=True, help="具体作品范围；精确匹配或配置的全局 *")
+        if command == "prompt":
+            p.add_argument("--output", help="可选显式导出 JSON 新文件；不覆盖，不接入生成")
+        elif command == "compare":
+            p.add_argument("current", help="手工当前 PNG；与所选参考原始尺寸须相同")
+            p.add_argument("output", help="尚不存在的 CAD-23 比较目录；左参考、右当前")
+            p.add_argument("--reference", required=True, help="显式选择唯一参考 id")
+            p.add_argument("--crop", type=int, nargs=4, required=True, metavar=("X", "Y", "W", "H"))
+            p.add_argument("--candidate-version", help="手工版本；未知则 null")
+            for name in ("palette", "proportion", "dominant-shape", "detail-density"):
+                p.add_argument("--" + name, help="人工比较文字；省略为未评审，不自动艺术评分")
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -174,6 +205,7 @@ def main(argv=None):
     add_project_parser(sub)
     add_stage_parser(sub)
     add_compare_parser(sub)
+    add_style_parser(sub)
     p = sub.add_parser("export-project", help="离线复制明确选定的正式成果，不上传")
     p.add_argument("root", help="项目根目录")
     p.add_argument("output", help="尚不存在的目录或 --zip 文件；父目录须存在")
@@ -184,7 +216,10 @@ def main(argv=None):
     p.add_argument("--zip", action="store_true", help="仅生成本地 ZIP")
 
     a = ap.parse_args(argv)
-    if a.cmd == "compare":
+    if a.cmd == "style":
+        from cwb_style import run as run_style
+        run_style(a)
+    elif a.cmd == "compare":
         from cwb_compare import run as run_compare
         run_compare(a)
     elif a.cmd == "stage":
