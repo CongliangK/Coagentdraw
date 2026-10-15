@@ -39,6 +39,35 @@ def http(url, payload=None, timeout=60):
         sys.exit("HTTP {0}: {1}".format(e.code, body))
 
 
+def add_project_parser(sub):
+    parser = sub.add_parser("project", help="离线项目状态与成果索引（不修改作品）")
+    commands = parser.add_subparsers(dest="project_cmd", required=True)
+    p = commands.add_parser("init", help="初始化八阶段目录，重复调用不会重置")
+    p.add_argument("name")
+    p.add_argument("--root", help="项目目录；默认仓库 _本地暂存/<项目名>")
+    for command in ("status", "edit", "stage", "record"):
+        p = commands.add_parser(command)
+        p.add_argument("root", help="项目目录；相对于当前工作目录")
+        if command != "status":
+            p.add_argument("--expect-revision", type=int, help="拒绝基于过期状态的写入")
+        if command == "edit":
+            p.add_argument("--intent", help="完整意图卡文本（可手工填写）")
+            p.add_argument("--pillar", action="append", help="替换设计支柱列表，可重复")
+            p.add_argument("--anchor", action="append", help="替换风格锚点列表，可重复")
+            p.add_argument("--clear-pillars", action="store_true")
+            p.add_argument("--clear-anchors", action="store_true")
+        elif command == "stage":
+            p.add_argument("number", type=int, choices=range(1, 9))
+            p.add_argument("--status", choices=("pending", "in_progress", "completed"), default="in_progress")
+            p.add_argument("--note", default="")
+        elif command == "record":
+            p.add_argument("path", help="相对于项目目录的现有文件路径；不复制/移动/修改文件")
+            p.add_argument("--stage", type=int, choices=range(1, 9))
+            p.add_argument("--category", choices=("temporary", "final"), required=True)
+            p.add_argument("--note", default="")
+
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -75,8 +104,13 @@ def main(argv=None):
     p.add_argument("record", help="UUID 运行目录内的 run.json")
     p.add_argument("--timeout", type=float, default=1800)
 
+    add_project_parser(sub)
+
     a = ap.parse_args(argv)
-    if a.cmd == "ping":
+    if a.cmd == "project":
+        from cwb_project import run as run_project
+        run_project(a)
+    elif a.cmd == "ping":
         print(json.dumps(http(Krita + "/ping"), ensure_ascii=False))
     elif a.cmd == "docs":
         print(json.dumps(http(Krita + "/docs"), ensure_ascii=False, indent=1))
