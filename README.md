@@ -66,6 +66,8 @@ python3 core/cwb.py comfy-edit base.png "..." --image2 ref.png --add 编辑层
 python3 core/cwb.py save 作品.kra
 ```
 
+参数、显式工作流契约、运行快照和 `comfy-replay` 详见 [ComfyUI CLI 说明](comfyui/README.md#cli-参数与契约cad-10)。离线回归：`python3 -m unittest discover -s tests -v`；它不代表已验证真实 Krita/ComfyUI 生成。
+
 环境变量：
 
 - `CWB_WF_DIR`：ComfyUI 工作流目录，默认为仓库内 `comfyui/`。使用前请先核实依赖模型已在 ComfyUI 中就位（见 [comfyui/README.md](comfyui/README.md)）。

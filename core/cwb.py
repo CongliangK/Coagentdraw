@@ -10,13 +10,12 @@
   cwb add out.png "背景"
   cwb save 作品.kra
   cwb comfy-t2i "a castle on a cliff" --w 1328 --h 1328 --add "天空"
-  cwb comfy-edit base.png ref.png "change ..." --add "换装"
+  cwb comfy-edit base.png "change ..." --image2 ref.png --add "换装"
 """
 import argparse
 import json
 import os
 import sys
-import time
 import urllib.error
 import urllib.request
 
@@ -40,62 +39,8 @@ def http(url, payload=None, timeout=60):
         sys.exit("HTTP {0}: {1}".format(e.code, body))
 
 
-def comfy_post(path, payload):
-    req = urllib.request.Request(Comfy + path, data=json.dumps(payload).encode(),
-                                 headers={"Content-Type": "application/json"})
-    with urllib.request.urlopen(req, timeout=30) as r:
-        return json.loads(r.read())
-
-
-def comfy_run(wf, max_wait=1800):
-    """提交工作流并轮询到完成,返回 (subfolder, filename) 列表。"""
-    resp = comfy_post("/prompt", {"prompt": wf, "client_id": "cwb"})
-    if resp.get("node_errors"):
-        sys.exit("ComfyUI node_errors:\n" + json.dumps(
-            resp["node_errors"], ensure_ascii=False)[:2000])
-    pid = resp["prompt_id"]
-    t0 = time.time()
-    while time.time() - t0 < max_wait:  # 双保险:总时限,防 /history 丢失死轮询
-        time.sleep(3)
-        try:
-            with urllib.request.urlopen(Comfy + "/history/" + pid, timeout=15) as r:
-                h = json.loads(r.read())
-        except urllib.error.URLError:
-            continue
-        if pid in h:
-            st = h[pid].get("status", {})
-            if st.get("status_str") == "error":
-                sys.exit("ComfyUI 执行出错: " + json.dumps(
-                    h[pid].get("status", {}), ensure_ascii=False)[:1000])
-            outs = []
-            for node_id, node_out in h[pid].get("outputs", {}).items():
-                for img in node_out.get("images", []):
-                    outs.append((img["subfolder"], img["filename"], node_id))
-            if outs:
-                return outs
-            if st.get("completed") or st.get("status_str") == "success":
-                sys.exit("工作流已完成但无图像输出(检查是否接了 SaveImage 节点)")
-    sys.exit("ComfyUI 轮询超时({0}s)".format(max_wait))
-
-
-def comfy_fetch(subfolder, filename, dest):
-    url = "{0}/view?subfolder={1}&filename={2}".format(Comfy, subfolder, filename)
-    with urllib.request.urlopen(url, timeout=60) as r:
-        data = r.read()
-    os.makedirs(os.path.dirname(dest), exist_ok=True)
-    with open(dest, "wb") as f:
-        f.write(data)
-    return dest
-
-
-def load_wf(name):
-    with open(os.path.join(WF_DIR, name)) as f:
-        return json.load(f)
-
-
-def main():
-    os.makedirs(WORKDIR, exist_ok=True)
-    ap = argparse.ArgumentParser()
+def main(argv=None):
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
 
     sub.add_parser("ping")
@@ -109,14 +54,28 @@ def main():
     p.add_argument("--y", type=int, default=0)
     p = sub.add_parser("visible"); p.add_argument("id"); p.add_argument("v")
     p = sub.add_parser("save"); p.add_argument("path")
-    p = sub.add_parser("comfy-t2i"); p.add_argument("prompt")
-    p.add_argument("--w", type=int, default=1328); p.add_argument("--h", type=int, default=1328)
-    p.add_argument("--seed", type=int, default=None); p.add_argument("--add")
-    p = sub.add_parser("comfy-edit"); p.add_argument("image1")
-    p.add_argument("prompt"); p.add_argument("--image2", default=None)
-    p.add_argument("--seed", type=int, default=None); p.add_argument("--add")
+    for command, default in (("comfy-t2i", "wf_qwen21_t2i_api.json"),
+                             ("comfy-edit", "wf_qwen21_edit_api.json")):
+        p = sub.add_parser(command)
+        if command == "comfy-edit":
+            p.add_argument("image1")
+            p.add_argument("--image2")
+        else:
+            p.add_argument("--w", type=int)
+            p.add_argument("--h", type=int)
+        p.add_argument("prompt")
+        p.add_argument("--wf", default=default, help="CWB_WF_DIR 内的工作流 JSON（需要同名 .contract.json）")
+        p.add_argument("--seed", type=int)
+        p.add_argument("--steps", type=int)
+        p.add_argument("--cfg", type=float)
+        p.add_argument("--denoise", type=float)
+        p.add_argument("--timeout", type=float, default=1800, help="上传、提交、轮询、下载总秒数")
+        p.add_argument("--add", help="单一输出时导入为新的 Krita 图层；多输出必须手动选择")
+    p = sub.add_parser("comfy-replay", help="显式再次提交保存的完整快照（会创建新任务）")
+    p.add_argument("record", help="UUID 运行目录内的 run.json")
+    p.add_argument("--timeout", type=float, default=1800)
 
-    a = ap.parse_args()
+    a = ap.parse_args(argv)
     if a.cmd == "ping":
         print(json.dumps(http(Krita + "/ping"), ensure_ascii=False))
     elif a.cmd == "docs":
@@ -143,55 +102,33 @@ def main():
     elif a.cmd == "save":
         print(json.dumps(http(Krita + "/doc/save", {"path": os.path.abspath(a.path)},
                               timeout=120), ensure_ascii=False))
-    elif a.cmd == "comfy-t2i":
-        wf = load_wf("wf_qwen21_t2i_api.json")
-        wf["encode"]["inputs"]["prompt"] = a.prompt
-        wf["latent"]["inputs"]["width"] = a.w
-        wf["latent"]["inputs"]["height"] = a.h
-        if a.seed is not None:
-            wf["sampler"]["inputs"]["seed"] = a.seed
-        outs = comfy_run(wf)
-        dest = comfy_fetch(*outs[0][:2],
-                           os.path.join(WORKDIR, "t2i_{0}.png".format(int(time.time()))))
-        print("生成:", dest)
-        if a.add:
-            print(json.dumps(http(Krita + "/layer/add",
-                                  {"png_path": dest, "name": a.add}, timeout=120),
-                              ensure_ascii=False))
-    elif a.cmd == "comfy-edit":
-        def upload(path):
-            # 文件名统一 ascii 时间戳,避免中文/引号/扩展名问题
-            name = "cwb_in_{0}.png".format(int(time.time() * 1000))
-            with open(path, "rb") as f:
-                body = (b"--X\r\nContent-Disposition: form-data; name=\"image\"; "
-                        b"filename=\"" + name.encode() + b"\"\r\n"
-                        b"Content-Type: application/octet-stream\r\n\r\n"
-                        + f.read() + b"\r\n--X--\r\n")
-            req = urllib.request.Request(
-                Comfy + "/upload/image?overwrite=true&type=input", data=body,
-                headers={"Content-Type": "multipart/form-data; boundary=X"})
-            with urllib.request.urlopen(req, timeout=30) as r:
-                json.loads(r.read())
-            return name
-
-        wf = load_wf("wf_qwen21_edit_api.json")
-        wf["load1"]["inputs"]["image"] = upload(os.path.abspath(a.image1))
-        if a.image2:
-            wf["load2"]["inputs"]["image"] = upload(os.path.abspath(a.image2))
-        else:  # 单图编辑:去掉 image_2 引用
-            wf["encode"]["inputs"]["images"] = {"image_1": ["load1", 0]}
-        wf["encode"]["inputs"]["prompt"] = a.prompt
-        if a.seed is not None:
-            wf["sampler"]["inputs"]["seed"] = a.seed
-        outs = comfy_run(wf)
-        dest = comfy_fetch(*outs[0][:2],
-                           os.path.join(WORKDIR, "edit_{0}.png".format(int(time.time()))))
-        print("生成:", dest)
-        if a.add:
-            print(json.dumps(http(Krita + "/layer/add",
-                                  {"png_path": dest, "name": a.add}, timeout=120),
-                              ensure_ascii=False))
+    elif a.cmd.startswith("comfy-"):
+        from cwb_comfy import ComfyError, execute, load_replay, prepare
+        if a.cmd == "comfy-replay":
+            graph, contract, previous = load_replay(a.record, Comfy)
+            result, path = execute(graph, contract, WORKDIR, Comfy, timeout=a.timeout, replay=previous)
+        else:
+            mode = "t2i" if a.cmd == "comfy-t2i" else "edit"
+            overrides = {key: getattr(a, key, None) for key in ("prompt", "seed", "steps", "cfg", "denoise", "w", "h")}
+            graph, contract = prepare(WF_DIR, a.wf, mode, overrides)
+            inputs = {key: getattr(a, key) for key in ("image1", "image2") if getattr(a, key, None)}
+            result, path = execute(graph, contract, WORKDIR, Comfy, inputs=inputs, timeout=a.timeout)
+        print("运行记录:", path)
+        for output in result["outputs"]:
+            print("生成:", output["path"])
+        if getattr(a, "add", None):
+            if len(result["outputs"]) != 1:
+                raise ComfyError("多输出已全部保存；未自动导入，请用 add 明确选择文件")
+            print(json.dumps(http(Krita + "/layer/add", {
+                "png_path": result["outputs"][0]["path"], "name": a.add}, timeout=120), ensure_ascii=False))
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except (OSError, ValueError, KeyError, TypeError) as exc:
+        print("错误:", exc, file=sys.stderr)
+        sys.exit(1)
+    except KeyboardInterrupt:
+        print("已中断；服务端任务可能仍在运行，请查看运行记录，勿盲目重试。", file=sys.stderr)
+        sys.exit(130)
