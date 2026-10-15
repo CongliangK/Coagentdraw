@@ -73,6 +73,8 @@ python3 core/cwb.py save 作品.kra
 
 离线项目状态与成果索引：`python3 core/cwb.py project --help`，目录、修订冲突和恢复说明见 [项目状态 CLI](design/项目状态_CLI.md)。
 
+确定性八阶段图层组：`python3 core/cwb.py stage --help`。需显式已保存文档与独立身份 sidecar；同名不接管、只补未登记组，重开降级/部分失败及已有诊断 PNG 导入边界见 [CAD-21 阶段组织](docs/development/cad21_stage.md)（未实机验证保存/重开）。
+
 环境变量：
 
 - `CWB_WF_DIR`：ComfyUI 工作流目录，默认为仓库内 `comfyui/`。使用前请先核实依赖模型已在 ComfyUI 中就位（见 [comfyui/README.md](comfyui/README.md)）。
