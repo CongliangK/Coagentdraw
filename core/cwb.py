@@ -14,6 +14,7 @@
 """
 import argparse
 import json
+import math
 import os
 import sys
 import urllib.error
@@ -68,6 +69,31 @@ def add_project_parser(sub):
 
 
 
+def _opacity_arg(value):
+    try:
+        number = float(value)
+    except ValueError:
+        raise argparse.ArgumentTypeError("opacity 必须是 0..1 的有限数值")
+    if not math.isfinite(number) or not 0 <= number <= 1:
+        raise argparse.ArgumentTypeError("opacity 必须是 0..1 的有限数值")
+    return number
+
+
+def add_stage_parser(sub):
+    parser = sub.add_parser("stage", help="八阶段组预设（独立身份 sidecar；不修改项目状态）")
+    commands = parser.add_subparsers(dest="stage_cmd", required=True)
+    for command in ("setup", "import-diagnostic", "status"):
+        p = commands.add_parser(command)
+        p.add_argument("--state", required=True, help="独立 *.cwb-stage.json 文件；保留并备份")
+        if command == "setup":
+            p.add_argument("number", type=int, choices=range(1, 9))
+        if command != "status":
+            p.add_argument("--document", required=True, help="已保存的活动 .kra 绝对或相对路径")
+        if command == "import-diagnostic":
+            p.add_argument("png", help="显式提供 #18 已有 PNG；不生成诊断图")
+            p.add_argument("--name", default="诊断 PNG")
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -102,6 +128,11 @@ def main(argv=None):
     p.add_argument("name")
     p.add_argument("--parent", help="父级组 ID；省略则挂到根")
     p.add_argument("--above", help="父级中的同级节点 ID")
+    p = sub.add_parser("props", help="设置图层属性（非原子事务，失败后回读 layers）")
+    p.add_argument("id")
+    p.add_argument("--alpha-locked", choices=("true", "false"))
+    p.add_argument("--opacity", type=_opacity_arg, help="0..1；0.5 量化为 128/255")
+    p.add_argument("--blending-mode", choices=("normal", "multiply", "overlay", "screen"))
     p = sub.add_parser("visible"); p.add_argument("id"); p.add_argument("v")
     p = sub.add_parser("save"); p.add_argument("path")
     for command, default in (("comfy-t2i", "wf_qwen21_t2i_api.json"),
@@ -126,6 +157,7 @@ def main(argv=None):
     p.add_argument("--timeout", type=float, default=1800)
 
     add_project_parser(sub)
+    add_stage_parser(sub)
     p = sub.add_parser("export-project", help="离线复制明确选定的正式成果，不上传")
     p.add_argument("root", help="项目根目录")
     p.add_argument("output", help="尚不存在的目录或 --zip 文件；父目录须存在")
@@ -136,7 +168,10 @@ def main(argv=None):
     p.add_argument("--zip", action="store_true", help="仅生成本地 ZIP")
 
     a = ap.parse_args(argv)
-    if a.cmd == "project":
+    if a.cmd == "stage":
+        from cwb_stage import run as run_stage
+        run_stage(a, http, Krita)
+    elif a.cmd == "project":
         from cwb_project import run as run_project
         run_project(a)
     elif a.cmd == "export-project":
@@ -182,6 +217,14 @@ def main(argv=None):
         print(json.dumps(http(Krita + "/layer/group", {
             "name": a.name, "parent_id": a.parent, "above": a.above,
         }), ensure_ascii=False))
+    elif a.cmd == "props":
+        payload = {key: getattr(a, key) for key in ("alpha_locked", "opacity", "blending_mode")
+                   if getattr(a, key) is not None}
+        if not payload:
+            ap.error("props 至少需要一个属性选项")
+        if "alpha_locked" in payload:
+            payload["alpha_locked"] = payload["alpha_locked"] == "true"
+        print(json.dumps(http(Krita + "/layer/props", {"id": a.id, **payload}), ensure_ascii=False))
     elif a.cmd == "visible":
         print(json.dumps(http(Krita + "/layer/visible",
                               {"id": a.id, "visible": a.v in ("1", "true")}),
