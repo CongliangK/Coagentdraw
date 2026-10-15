@@ -28,6 +28,7 @@ POST_ROUTES = {
     "/layer/group": (ops.layer_group, ("name",), ("parent_id", "above")),
     "/layer/add": (ops.layer_add, ("png_path", "name"),
                    ("above", "offset_x", "offset_y", "parent_id")),
+    "/layer/props": (ops.layer_props, ("id",), ("alpha_locked", "opacity", "blending_mode")),
     "/layer/visible": (ops.layer_set_visible, ("id", "visible"), ()),
     "/layer/rename": (ops.layer_rename, ("id", "name"), ()),
 }
@@ -85,6 +86,8 @@ class ControlServer(object):
                     self._reply(503, {"error": str(exc)})
                 except ops.NotFoundError as exc:
                     self._reply(404, {"error": str(exc)})
+                except ops.PropsWriteError as exc:
+                    self._reply(400, exc.payload)
                 except ops.OpError as exc:
                     self._reply(400, {"error": str(exc)})
                 except (BrokenPipeError, ConnectionResetError):
@@ -129,6 +132,10 @@ class ControlServer(object):
                 missing = [k for k in required if k not in data]
                 if missing:
                     raise ops.OpError("缺少必填参数: {0}".format(", ".join(missing)))
+                if path == "/layer/props":
+                    unknown = set(data) - set(required + optional)
+                    if unknown or not any(k in data for k in optional):
+                        raise ops.OpError("props 需要至少一个已知属性,不接受未知字段")
                 kwargs = {ALIAS.get(k, k): data[k]
                           for k in required + optional if k in data}
                 return fn, kwargs

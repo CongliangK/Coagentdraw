@@ -58,8 +58,11 @@
 | `/layer/group` | POST | 新建图层组，可用 parent_id 嵌套、above 定位同级 |
 | `/layer/add` | POST | PNG → 新 paint 图层(非破坏式,可指定 parent_id/above/offset) |
 | `/layer/visible` `/layer/rename` | POST | 可见性 / 重命名 |
+| `/layer/props` | POST | Alpha Lock / 0..1 不透明度 / 稳定 ID 混合模式（写后回读，非原子事务） |
 
 图层组与组内 PNG 导入的参数约束、CLI 示例及真实 Krita 验收步骤见 [CAD-11 图层组说明](docs/development/cad11_layer_groups.md)。
+
+图层属性契约、CLI 示例、部分写入语义与实机待验清单见 [CAD-12 图层属性说明](docs/development/cad12_layer_props.md)。`/layers` 增加 `alpha_locked`、`alpha_lock_supported`、`blending_mode`；混合模式画布效果尚未在本机验收。
 
 `cwb.py export`、`selection-png`、`snapshot` 的参数、RGBA/U8+sRGB 限制、蒙版灰度/Alpha、无选区与覆盖失败边界见 [CAD-13 快照契约](<docs/development/cad13_snapshot.md>)。仅配对入口可声明同回调捕获；token 的实机关闭/重开门槛尚待验证，当前不能作为安全回填凭证。
 
