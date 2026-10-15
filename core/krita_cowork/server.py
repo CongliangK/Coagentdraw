@@ -19,6 +19,11 @@ from .bridge_qt import MainThreadBridge
 POST_ROUTES = {
     "/doc/new": (ops.doc_new, ("name", "width", "height"), ()),
     "/doc/save": (ops.doc_save_as, ("path",), ()),
+    "/doc/export": (ops.doc_export, ("path",), ("overwrite", "expected_document_token")),
+    "/doc/selection_png": (ops.doc_selection_png, ("path",),
+                           ("selection_mode", "overwrite", "expected_document_token")),
+    "/doc/snapshot": (ops.doc_snapshot, ("projection_path", "selection_path"),
+                      ("selection_mode", "overwrite", "expected_document_token")),
     "/layer/png": (ops.layer_png, ("id", "path"), ()),
     "/layer/group": (ops.layer_group, ("name",), ("parent_id", "above")),
     "/layer/add": (ops.layer_add, ("png_path", "name"),
