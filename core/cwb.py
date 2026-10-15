@@ -114,6 +114,21 @@ def add_compare_parser(sub):
     p.add_argument("--expect-sequence", type=int, required=True, help="show 返回的事件序号（首次为 0）")
 
 
+def add_layout_parser(sub):
+    parser = sub.add_parser("layout", help="已有六图离线设定页；不生成视图、不写 Krita")
+    commands = parser.add_subparsers(dest="layout_cmd", required=True)
+    p = commands.add_parser("fixture", help="新目录中创建教学占位 PNG，非真实角色案例")
+    p.add_argument("output")
+    p = commands.add_parser("plan", help="校验来源/尺度/人工锚点并输出 manifest；不需 Pillow")
+    p.add_argument("spec")
+    p = commands.add_parser("render", help="新目录保留原图/独立缩放 PNG/文本 SVG；仅CLI可选Pillow")
+    p.add_argument("spec")
+    p.add_argument("output")
+    p = commands.add_parser("prepare", help="只打印人工执行 payload；绝不自动 apply/联网")
+    p.add_argument("bundle")
+    p.add_argument("--document", required=True, help="已保存的专用目标 .kra；离线不验证活动状态")
+
+
 def add_review_parser(sub):
     parser = sub.add_parser("review", help="离线审评接口准备/手工反馈导入；无后端调用")
     commands = parser.add_subparsers(dest="review_cmd", required=True)
@@ -249,6 +264,7 @@ def main(argv=None):
     add_candidates_parser(sub)
     add_style_parser(sub)
     add_review_parser(sub)
+    add_layout_parser(sub)
     p = sub.add_parser("export-project", help="离线复制明确选定的正式成果，不上传")
     p.add_argument("root", help="项目根目录")
     p.add_argument("output", help="尚不存在的目录或 --zip 文件；父目录须存在")
@@ -268,6 +284,9 @@ def main(argv=None):
     elif a.cmd == "review":
         from cwb_review import run as run_review
         run_review(a)
+    elif a.cmd == "layout":
+        from cwb_layout import run as run_layout
+        run_layout(a)
     elif a.cmd == "compare":
         from cwb_compare import run as run_compare
         run_compare(a)

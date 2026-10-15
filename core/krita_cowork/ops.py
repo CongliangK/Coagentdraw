@@ -246,8 +246,8 @@ def _insertion_target(doc, parent_id, above_layer_id):
         raise OpError("parent_id 必须指向 groupLayer")
     above = None if above_layer_id is None else _find_node(doc, above_layer_id)
     if above is not None:
-        if above.type() not in ("grouplayer", "paintlayer"):
-            raise OpError("above 仅支持 groupLayer/paintLayer")
+        if above.type() not in ("grouplayer", "paintlayer", "vectorlayer"):
+            raise OpError("above 仅支持 groupLayer/paintLayer/vectorLayer")
         if _node_id(above) not in [_node_id(n) for n in parent.childNodes()]:
             raise OpError("above 必须是指定父级的直接子节点")
     return parent, above
@@ -355,6 +355,25 @@ def layer_add(png_path, name, above_layer_id=None, offset_x=0, offset_y=0,
             "parent_id": _node_id(parent), "placement": mapping}
 
 
+def layer_vector(svg, name, target_document, canvas, dpi, dedicated_document,
+                 parent_id=None, above_layer_id=None):
+    """受控标注入口;整个调用由现有主线程桥分派。"""
+    from types import SimpleNamespace
+    from .vector import VectorError, VectorWriteError, import_annotations
+    api = SimpleNamespace(_krita=_krita, _active_doc=_active_doc, _check_rgba8=_check_rgba8,
+                          _insertion_target=_insertion_target, _verify_attached=_verify_attached,
+                          _node_id=_node_id)
+    try:
+        return import_annotations(api, svg=svg, name=name,
+                                  target_document=target_document, canvas=canvas, dpi=dpi,
+                                  dedicated_document=dedicated_document,
+                                  parent_id=parent_id, above_layer_id=above_layer_id)
+    except VectorError as exc:
+        raise OpError(str(exc)) from exc
+    except VectorWriteError as exc:
+        raise PropsWriteError(exc.payload) from exc
+
+
 def _alpha_supported(node):
     return (node.type() == "paintlayer" and
             callable(getattr(node, "alphaLocked", None)) and
@@ -385,8 +404,8 @@ def layer_props(layer_id, alpha_locked=_UNSET, opacity=_UNSET, blending_mode=_UN
     doc = _active_doc()
     _check_rgba8(doc)
     node = _find_node(doc, layer_id)
-    if node.type() not in ("paintlayer", "grouplayer"):
-        raise OpError("属性写入仅支持 paintLayer/groupLayer")
+    if node.type() not in ("paintlayer", "grouplayer", "vectorlayer"):
+        raise OpError("属性写入仅支持 paintLayer/groupLayer/vectorLayer")
     if alpha_locked is not _UNSET and not _alpha_supported(node):
         raise OpError("此节点不支持 Alpha Lock(仅 paintLayer)")
     # 在首次写入前探测全部方法和读取能力;不把 API 缺失当作成功。
