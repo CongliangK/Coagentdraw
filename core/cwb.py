@@ -114,6 +114,20 @@ def add_compare_parser(sub):
     p.add_argument("--expect-sequence", type=int, required=True, help="show 返回的事件序号（首次为 0）")
 
 
+def add_review_parser(sub):
+    parser = sub.add_parser("review", help="离线审评接口准备/手工反馈导入；无后端调用")
+    commands = parser.add_subparsers(dest="review_cmd", required=True)
+    p = commands.add_parser("prepare", help="仅准备请求；不发送；PNG 校验需可选 CLI Pillow")
+    for role in ("original", "silhouette", "grayscale"):
+        p.add_argument("--" + role, required=True, help="用户已有的同尺寸 PNG；不生成诊断图")
+    p.add_argument("--context", required=True, help="手工 JSON：intent（未知 null）、pillars（未知 []）")
+    p.add_argument("output", help="全新独立目录；父目录须存在，不覆盖旧工件")
+    p = commands.add_parser("import", help="显式导入用户提供的 human/model JSON；不调用模型")
+    p.add_argument("prepared", help="prepare 输出目录；原始来源必须未改变")
+    p.add_argument("feedback", help="用户手工提供的反馈 JSON，可含人工 confirm/amend/reject")
+    p.add_argument("output", help="全新导出目录：Markdown + JSON + 原始反馈；不覆盖历史")
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -174,6 +188,7 @@ def main(argv=None):
     add_project_parser(sub)
     add_stage_parser(sub)
     add_compare_parser(sub)
+    add_review_parser(sub)
     p = sub.add_parser("export-project", help="离线复制明确选定的正式成果，不上传")
     p.add_argument("root", help="项目根目录")
     p.add_argument("output", help="尚不存在的目录或 --zip 文件；父目录须存在")
@@ -184,7 +199,10 @@ def main(argv=None):
     p.add_argument("--zip", action="store_true", help="仅生成本地 ZIP")
 
     a = ap.parse_args(argv)
-    if a.cmd == "compare":
+    if a.cmd == "review":
+        from cwb_review import run as run_review
+        run_review(a)
+    elif a.cmd == "compare":
         from cwb_compare import run as run_compare
         run_compare(a)
     elif a.cmd == "stage":
