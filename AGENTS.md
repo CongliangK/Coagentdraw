@@ -32,13 +32,13 @@
 
 ## 验证与交付
 
-仓库目前没有自动化测试套件。代码改动至少执行以下不需要 Krita/ComfyUI 在线的检查：
+CLI 离线回归使用 `python3 -m unittest discover -s tests -v`。代码改动还需执行以下不需要 Krita/ComfyUI 在线的检查：
 
 ```bash
 python3 - <<'PY'
 import ast
 from pathlib import Path
-paths = [Path('core/cwb.py'), *sorted(Path('core/krita_cowork').glob('*.py'))]
+paths = [*sorted(Path('core').glob('*.py')), *sorted(Path('core/krita_cowork').glob('*.py'))]
 for path in paths:
     ast.parse(path.read_text(encoding='utf-8'), filename=str(path))
 print(f'Python syntax OK: {len(paths)} files')
@@ -49,7 +49,7 @@ git diff --check
 
 涉及插件功能的变更，在服务可用且用户授权范围允许时再验证 `ping`、文档列表和图层列表；保存或写图层的测试使用专用测试文档，不修改用户正在工作的作品。静态检查不等于运行验证，汇报时注明未验证部分。
 
-注意：客户端在参数解析前会创建本机缓存目录，所以 `python3 core/cwb.py --help` 不是完全无副作用的检查。
+`python3 core/cwb.py --help` 与子命令帮助不创建缓存目录或访问服务；真实生成才建立独立运行目录。
 
 ## Git 约定
 
