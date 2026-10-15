@@ -9,6 +9,19 @@
 - offset 越界/类型非法在写像素前拒绝(Krita 会静默裁剪,必须自检)。
 """
 import os
+import math
+
+# Krita composite operation IDs, not translated GUI labels. Local visual QA pending.
+BLENDING_MODES = ("normal", "multiply", "overlay", "screen")
+_UNSET = object()
+
+
+class PropsWriteError(Exception):
+    """写阶段失败,不承诺回滚;payload 可供客户端判断后回读。"""
+
+    def __init__(self, payload):
+        self.payload = payload
+        super().__init__(payload["error"])
 
 try:
     from PyQt6.QtGui import QImage
@@ -116,6 +129,9 @@ def layers():
             "width": b.width(),
             "height": b.height(),
             "opacity": round(n.opacity() / 255.0, 3),  # 归一化 0-1
+            "alpha_locked": n.alphaLocked() if _alpha_supported(n) else None,
+            "alpha_lock_supported": _alpha_supported(n),
+            "blending_mode": n.blendingMode(),  # 原始稳定 ID,不改写未知模式
             "depth": depth,
             "children": [ser(c, depth + 1) for c in n.childNodes()],
         }
@@ -260,6 +276,72 @@ def layer_add(png_path, name, above_layer_id=None, offset_x=0, offset_y=0,
     doc.refreshProjection()
     return {"id": _node_id(layer), "name": layer.name(), "width": w, "height": h,
             "parent_id": _node_id(parent)}
+
+
+def _alpha_supported(node):
+    return (node.type() == "paintlayer" and
+            callable(getattr(node, "alphaLocked", None)) and
+            callable(getattr(node, "setAlphaLocked", None)))
+
+
+def layer_props(layer_id, alpha_locked=_UNSET, opacity=_UNSET, blending_mode=_UNSET):
+    """先验证所有参数/能力,再按 alpha/opacity/blend 顺序写入并逐项回读。
+
+    不是事务: setter 抛异常/返回 False/回读不符时停止,保留已写状态并明确报错。
+    """
+    changes = []
+    if alpha_locked is not _UNSET:
+        if type(alpha_locked) is not bool:
+            raise OpError("alpha_locked 必须是布尔值")
+        changes.append(("alpha_locked", "setAlphaLocked", "alphaLocked", alpha_locked))
+    if opacity is not _UNSET:
+        if (type(opacity) not in (int, float) or not 0 <= opacity <= 1 or
+                not math.isfinite(opacity)):
+            raise OpError("opacity 必须是 0..1 的有限数值(不接受 bool)")
+        changes.append(("opacity", "setOpacity", "opacity", math.floor(opacity * 255 + 0.5)))
+    if blending_mode is not _UNSET:
+        if type(blending_mode) is not str or blending_mode not in BLENDING_MODES:
+            raise OpError("blending_mode 必须是: " + ", ".join(BLENDING_MODES))
+        changes.append(("blending_mode", "setBlendingMode", "blendingMode", blending_mode))
+    if not changes:
+        raise OpError("至少指定一个图层属性")
+    doc = _active_doc()
+    _check_rgba8(doc)
+    node = _find_node(doc, layer_id)
+    if node.type() not in ("paintlayer", "grouplayer"):
+        raise OpError("属性写入仅支持 paintLayer/groupLayer")
+    if alpha_locked is not _UNSET and not _alpha_supported(node):
+        raise OpError("此节点不支持 Alpha Lock(仅 paintLayer)")
+    # 在首次写入前探测全部方法和读取能力;不把 API 缺失当作成功。
+    for key, setter, getter, value in changes:
+        if not callable(getattr(node, setter, None)) or not callable(getattr(node, getter, None)):
+            raise OpError("此节点不支持属性: " + key)
+        try:
+            getattr(node, getter)()
+        except Exception as exc:
+            raise OpError("属性预读失败: " + key) from exc
+    attempted, verified, values = [], [], {}
+    current = "refreshProjection"
+    try:
+        for key, setter, getter, value in changes:
+            current = key
+            attempted.append(key)  # setter 即使抛异常也可能已经修改节点
+            result = getattr(node, setter)(value)
+            actual = getattr(node, getter)()
+            if result is False or actual != value:
+                raise RuntimeError("setter 失败或回读不符: {0!r} != {1!r}".format(actual, value))
+            verified.append(key)
+            values[key] = round(actual / 255.0, 3) if key == "opacity" else actual
+        current = "refreshProjection"
+        doc.refreshProjection()
+    except Exception as exc:
+        raise PropsWriteError({
+            "error": "属性写入失败;可能已部分写入,未回滚,请重新读取 /layers: " + str(exc),
+            "id": _node_id(node), "failed": current,
+            "attempted": attempted, "verified": verified, "rolled_back": False,
+        }) from exc
+    # 与 /layers 一致返回实际量化后的 opacity,不回显未经回读的输入。
+    return {"id": _node_id(node), **values}
 
 
 def layer_set_visible(layer_id, visible):
