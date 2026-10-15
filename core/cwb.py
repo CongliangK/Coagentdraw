@@ -94,6 +94,26 @@ def add_stage_parser(sub):
             p.add_argument("--name", default="诊断 PNG")
 
 
+def add_compare_parser(sub):
+    parser = sub.add_parser("compare", help="离线 PNG 并排比较与决定记录（不修改 Krita，不接入 #25）")
+    commands = parser.add_subparsers(dest="compare_cmd", required=True)
+    p = commands.add_parser("create", help="手工 before/after → 新目录；可选 CLI-only Pillow")
+    p.add_argument("before")
+    p.add_argument("after")
+    p.add_argument("output", help="尚不存在的目录，父目录必须存在；绝不覆盖旧结果")
+    p.add_argument("--crop", nargs=4, type=int, metavar=("X", "Y", "W", "H"), help="共同原生像素裁切，不缩放")
+    for field in ("source-version", "candidate-version", "prompt", "workflow", "document-ref", "candidate-layer-ref"):
+        p.add_argument("--" + field, help="手工提供的未验证关联；省略为未知，不读取所指文件")
+    p.add_argument("--seed", type=int, help="手工提供；省略为未知")
+    p = commands.add_parser("show", help="重开查询资产、完整事件和理由；无需 Pillow")
+    p.add_argument("output")
+    p = commands.add_parser("decide", help="仅记录；hide/withdraw 不会隐藏图层或恢复原投影")
+    p.add_argument("output")
+    p.add_argument("action", choices=("accept", "reject", "hide", "withdraw"))
+    p.add_argument("--reason", required=True)
+    p.add_argument("--expect-sequence", type=int, required=True, help="show 返回的事件序号（首次为 0）")
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -153,6 +173,7 @@ def main(argv=None):
 
     add_project_parser(sub)
     add_stage_parser(sub)
+    add_compare_parser(sub)
     p = sub.add_parser("export-project", help="离线复制明确选定的正式成果，不上传")
     p.add_argument("root", help="项目根目录")
     p.add_argument("output", help="尚不存在的目录或 --zip 文件；父目录须存在")
@@ -163,7 +184,10 @@ def main(argv=None):
     p.add_argument("--zip", action="store_true", help="仅生成本地 ZIP")
 
     a = ap.parse_args(argv)
-    if a.cmd == "stage":
+    if a.cmd == "compare":
+        from cwb_compare import run as run_compare
+        run_compare(a)
+    elif a.cmd == "stage":
         from cwb_stage import run as run_stage
         run_stage(a, http, Krita)
     elif a.cmd == "project":
