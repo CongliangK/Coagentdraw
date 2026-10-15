@@ -161,6 +161,11 @@ def main(argv=None):
     p.add_argument("--above"); p.add_argument("--x", type=int, default=0)
     p.add_argument("--y", type=int, default=0)
     p.add_argument("--parent", help="父级组 ID；省略则挂到根")
+    placement = p.add_mutually_exclusive_group()
+    placement.add_argument("--mode", choices=("keep_size", "fit_canvas", "insert_at_offset"),
+                           help="原尺寸原点 / 等比缩小居中（不放大） / 原尺寸偏移；默认兼容已有 offset")
+    placement.add_argument("--fit-canvas", action="store_true", default=None,
+                           help="--mode fit_canvas 的兼容别名，不可搭配非零 --x/--y")
     p = sub.add_parser("group", help="创建空图层组（可嵌套）")
     p.add_argument("name")
     p.add_argument("--parent", help="父级组 ID；省略则挂到根")
@@ -251,11 +256,13 @@ def main(argv=None):
                               {"name": a.name, "width": a.w, "height": a.h}),
                           ensure_ascii=False))
     elif a.cmd == "add":
-        print(json.dumps(http(Krita + "/layer/add", {
-            "png_path": os.path.abspath(a.png), "name": a.name,
-            "above": a.above, "offset_x": a.x, "offset_y": a.y,
-            "parent_id": a.parent,
-        }, timeout=120), ensure_ascii=False))
+        payload = {"png_path": os.path.abspath(os.path.expanduser(a.png)), "name": a.name,
+                   "above": a.above, "offset_x": a.x, "offset_y": a.y, "parent_id": a.parent}
+        if a.mode is not None:
+            payload["mode"] = a.mode
+        if a.fit_canvas is not None:
+            payload["fit_canvas"] = a.fit_canvas
+        print(json.dumps(http(Krita + "/layer/add", payload, timeout=120), ensure_ascii=False))
     elif a.cmd == "group":
         print(json.dumps(http(Krita + "/layer/group", {
             "name": a.name, "parent_id": a.parent, "above": a.above,
