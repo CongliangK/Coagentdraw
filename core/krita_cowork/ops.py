@@ -149,6 +149,37 @@ def layer_png(layer_id, path):
     return {"path": out_path, "width": b.width(), "height": b.height()}
 
 
+def _snapshot_export(**kwargs):
+    # Lazy import keeps the codec isolated and all Krita access inside this
+    # existing MainThreadBridge operation (including paired projection + mask).
+    from .snapshot import SnapshotError, export_snapshot
+    for key in ("projection_path", "selection_path"):
+        if key in kwargs and not isinstance(kwargs[key], str):
+            raise OpError("{0} 必须是非空 PNG 路径".format(key))
+    try:
+        return export_snapshot(_krita(), **kwargs)
+    except SnapshotError as exc:
+        raise OpError(str(exc)) from exc
+
+
+def doc_export(path, overwrite=False, expected_document_token=None):
+    return _snapshot_export(projection_path=path, overwrite=overwrite,
+                            expected_document_token=expected_document_token)
+
+
+def doc_selection_png(path, selection_mode="selection", overwrite=False,
+                      expected_document_token=None):
+    return _snapshot_export(selection_path=path, selection_mode=selection_mode,
+                            overwrite=overwrite, expected_document_token=expected_document_token)
+
+
+def doc_snapshot(projection_path, selection_path, selection_mode="selection",
+                 overwrite=False, expected_document_token=None):
+    return _snapshot_export(projection_path=projection_path, selection_path=selection_path,
+                            selection_mode=selection_mode, overwrite=overwrite,
+                            expected_document_token=expected_document_token)
+
+
 # ── 写操作 ────────────────────────────────────────────────────────
 
 def doc_new(name, width, height):
