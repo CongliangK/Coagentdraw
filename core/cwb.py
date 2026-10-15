@@ -14,6 +14,7 @@
 """
 import argparse
 import json
+import math
 import os
 import sys
 import urllib.error
@@ -66,6 +67,16 @@ def add_project_parser(sub):
             p.add_argument("--category", choices=("temporary", "final"), required=True)
             p.add_argument("--note", default="")
 
+
+
+def _opacity_arg(value):
+    try:
+        number = float(value)
+    except ValueError:
+        raise argparse.ArgumentTypeError("opacity 必须是 0..1 的有限数值")
+    if not math.isfinite(number) or not 0 <= number <= 1:
+        raise argparse.ArgumentTypeError("opacity 必须是 0..1 的有限数值")
+    return number
 
 
 def add_stage_parser(sub):
@@ -132,6 +143,11 @@ def main(argv=None):
     p.add_argument("name")
     p.add_argument("--parent", help="父级组 ID；省略则挂到根")
     p.add_argument("--above", help="父级中的同级节点 ID")
+    p = sub.add_parser("props", help="设置图层属性（非原子事务，失败后回读 layers）")
+    p.add_argument("id")
+    p.add_argument("--alpha-locked", choices=("true", "false"))
+    p.add_argument("--opacity", type=_opacity_arg, help="0..1；0.5 量化为 128/255")
+    p.add_argument("--blending-mode", choices=("normal", "multiply", "overlay", "screen"))
     p = sub.add_parser("visible"); p.add_argument("id"); p.add_argument("v")
     p = sub.add_parser("save"); p.add_argument("path")
     for command, default in (("comfy-t2i", "wf_qwen21_t2i_api.json"),
@@ -218,6 +234,14 @@ def main(argv=None):
         print(json.dumps(http(Krita + "/layer/group", {
             "name": a.name, "parent_id": a.parent, "above": a.above,
         }), ensure_ascii=False))
+    elif a.cmd == "props":
+        payload = {key: getattr(a, key) for key in ("alpha_locked", "opacity", "blending_mode")
+                   if getattr(a, key) is not None}
+        if not payload:
+            ap.error("props 至少需要一个属性选项")
+        if "alpha_locked" in payload:
+            payload["alpha_locked"] = payload["alpha_locked"] == "true"
+        print(json.dumps(http(Krita + "/layer/props", {"id": a.id, **payload}), ensure_ascii=False))
     elif a.cmd == "visible":
         print(json.dumps(http(Krita + "/layer/visible",
                               {"id": a.id, "visible": a.v in ("1", "true")}),
