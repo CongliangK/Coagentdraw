@@ -114,6 +114,28 @@ def add_compare_parser(sub):
     p.add_argument("--expect-sequence", type=int, required=True, help="show 返回的事件序号（首次为 0）")
 
 
+def add_candidates_parser(sub):
+    parser = sub.add_parser("candidates", help="有限离线候选计划/现成剪影拼板；不生成、不写 Krita")
+    commands = parser.add_subparsers(dest="candidates_cmd", required=True)
+    p = commands.add_parser("plan", help="稳定编号/seed 的 prepared_not_executed 计划；无需 Pillow")
+    p.add_argument("prompt")
+    p.add_argument("output", help="尚不存在的目录；父目录须存在，旧输出不覆盖")
+    p.add_argument("--count", type=int, required=True)
+    p.add_argument("--seed-start", type=int, required=True)
+    p.add_argument("--seed-end", type=int, required=True)
+    p.add_argument("--direction", action="append", default=[], help="人工概念方向，轮流分配；省略为未知")
+    p.add_argument("--workflow-source", help="人工来源说明；不读取工作流、不执行")
+    p = commands.add_parser("board", help="显式 SHA 登记的透明黑 PNG → contain 拼板；失败保留占位/退出 2")
+    p.add_argument("plan", help="plan 输出的 manifest.json")
+    p.add_argument("registration", help="逐候选显式登记 JSON；未知 seed/方向/工作流用 null")
+    p.add_argument("output", help="尚不存在的目录；父目录须存在，旧输出不覆盖")
+    p.add_argument("--columns", type=int, default=4)
+    p.add_argument("--cell-width", type=int, default=256)
+    p.add_argument("--cell-height", type=int, default=256)
+    p.add_argument("--select", action="append", default=[], help="入选候选 ID；仅导出清单/新层 payload")
+    p.add_argument("--parent-ref", help="未验证的目标组 ID；不连接 Krita")
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -174,6 +196,7 @@ def main(argv=None):
     add_project_parser(sub)
     add_stage_parser(sub)
     add_compare_parser(sub)
+    add_candidates_parser(sub)
     p = sub.add_parser("export-project", help="离线复制明确选定的正式成果，不上传")
     p.add_argument("root", help="项目根目录")
     p.add_argument("output", help="尚不存在的目录或 --zip 文件；父目录须存在")
@@ -184,7 +207,10 @@ def main(argv=None):
     p.add_argument("--zip", action="store_true", help="仅生成本地 ZIP")
 
     a = ap.parse_args(argv)
-    if a.cmd == "compare":
+    if a.cmd == "candidates":
+        from cwb_candidates import run as run_candidates
+        run_candidates(a)
+    elif a.cmd == "compare":
         from cwb_compare import run as run_compare
         run_compare(a)
     elif a.cmd == "stage":
