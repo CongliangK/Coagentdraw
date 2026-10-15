@@ -112,13 +112,28 @@ def doc_info():
     }
 
 
+def _optional_layer_property(node, getter, required_methods=()):
+    """仅供列表的新增可选属性使用;写入预读/回读不得降级为未知。"""
+    supported = None  # 能力探测自身异常时,不能谎称不支持。
+    try:
+        methods = {name: getattr(node, name, None) for name in (getter, *required_methods)}
+        missing = [name for name, method in methods.items() if not callable(method)]
+        if missing:
+            return None, False, {"status": "unavailable", "error": "API missing: " + ", ".join(missing)}
+        supported = True
+        return methods[getter](), supported, {"status": "ok"}
+    except Exception as exc:
+        return None, supported, {"status": "error", "error": "{0}: {1}".format(type(exc).__name__, exc)}
+
+
 def layers():
     doc = _active_doc()
     _check_rgba8(doc)
 
     def ser(n, depth):
         b = n.bounds()  # root 层无 x()/y(),统一走 bounds
-        return {
+        # 旧字段/树结构保持严格读取,不把其异常伪装成完整列表。
+        result = {
             "id": _node_id(n),
             "name": n.name(),
             "type": n.type(),
@@ -129,12 +144,21 @@ def layers():
             "width": b.width(),
             "height": b.height(),
             "opacity": round(n.opacity() / 255.0, 3),  # 归一化 0-1
-            "alpha_locked": n.alphaLocked() if _alpha_supported(n) else None,
-            "alpha_lock_supported": _alpha_supported(n),
-            "blending_mode": n.blendingMode(),  # 原始稳定 ID,不改写未知模式
             "depth": depth,
             "children": [ser(c, depth + 1) for c in n.childNodes()],
         }
+        if result["type"] == "paintlayer":
+            alpha, supported, alpha_status = _optional_layer_property(n, "alphaLocked", ("setAlphaLocked",))
+        else:
+            alpha, supported, alpha_status = None, False, {"status": "unsupported"}
+        mode, _, mode_status = _optional_layer_property(n, "blendingMode")
+        result.update({
+            "alpha_locked": alpha,
+            "alpha_lock_supported": supported,
+            "blending_mode": mode,  # 保留原始稳定 ID,不改写未知模式。
+            "property_status": {"alpha_locked": alpha_status, "blending_mode": mode_status},
+        })
+        return result
 
     return {"document": doc.name(), "layers": [ser(doc.rootNode(), 0)]}
 
