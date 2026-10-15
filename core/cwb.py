@@ -91,6 +91,17 @@ def main(argv=None):
     sub.add_parser("docs")
     sub.add_parser("layers")
     p = sub.add_parser("png"); p.add_argument("id"); p.add_argument("path")
+    for command in ("export", "selection-png", "snapshot"):
+        p = sub.add_parser(command, help="整画布只读 PNG 导出（snapshot 同回调配对）")
+        if command == "snapshot":
+            p.add_argument("projection_path")
+            p.add_argument("selection_path")
+        else:
+            p.add_argument("path")
+        if command != "export":
+            p.add_argument("--full-canvas", action="store_true", help="显式以全白蒙版替代当前选区")
+        p.add_argument("--overwrite", action="store_true", help="显式覆盖输出；两个文件不是原子事务")
+        p.add_argument("--expect-document-token", help="拒绝失效或非当前文档的会话 token")
     p = sub.add_parser("new"); p.add_argument("name"); p.add_argument("w", type=int)
     p.add_argument("h", type=int)
     p = sub.add_parser("add"); p.add_argument("png"); p.add_argument("name")
@@ -144,6 +155,20 @@ def main(argv=None):
         print(json.dumps(http(Krita + "/layer/png",
                               {"id": a.id, "path": os.path.abspath(a.path)},
                               timeout=120), ensure_ascii=False))
+    elif a.cmd in ("export", "selection-png", "snapshot"):
+        payload = {"overwrite": a.overwrite}
+        if a.expect_document_token is not None:
+            payload["expected_document_token"] = a.expect_document_token
+        if a.cmd == "snapshot":
+            payload.update(projection_path=os.path.abspath(os.path.expanduser(a.projection_path)),
+                           selection_path=os.path.abspath(os.path.expanduser(a.selection_path)))
+        else:
+            payload["path"] = os.path.abspath(os.path.expanduser(a.path))
+        if a.cmd != "export":
+            payload["selection_mode"] = "full_canvas" if a.full_canvas else "selection"
+        route = {"export": "/doc/export", "selection-png": "/doc/selection_png",
+                 "snapshot": "/doc/snapshot"}[a.cmd]
+        print(json.dumps(http(Krita + route, payload, timeout=120), ensure_ascii=False, indent=1))
     elif a.cmd == "new":
         print(json.dumps(http(Krita + "/doc/new",
                               {"name": a.name, "width": a.w, "height": a.h}),
