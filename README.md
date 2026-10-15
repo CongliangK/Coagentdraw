@@ -86,6 +86,8 @@ python3 core/cwb.py save 作品.kra
 
 最小离线文件比较：`python3 core/cwb.py compare --help`。接受手工 before/after PNG，原尺度共同裁切、来源 SHA256 和非破坏性决定事件见 [CAD-23 比较说明](<docs/development/cad23_compare.md>)。仅 `create` 使用外部 CLI 可选 Pillow；所有决定仅记录，不实际隐藏/恢复 Krita 投影，不代表 #17 完成或 #25 联调。
 
+离线视觉审评接口准备：`python3 core/cwb.py review --help`。`prepare` 仅记录用户已有原图/剪影/灰阶 PNG 和手工意图/支柱（`prepared_not_executed`），`import` 仅校验用户手工提供的反馈及人工确认/修改/驳回，导出 Markdown+JSON（`response_user_supplied`）。见 [CAD-24 契约与未完成验收](<docs/development/cad24_review.md>)。**无已验证的审评后端、模型调用或艺术效果证据；合成 fixture 不是真实角色验收，#24 不关闭。**
+
 有限离线候选计划/现成剪影拼板：`python3 core/cwb.py candidates --help`。仅 `plan` 记录 `prepared_not_executed`；`board` 消费显式 SHA 登记的透明黑 PNG，contain 不拉伸，失败占位不消失（退出 2），仅输出入选清单/未执行新层 payload。可选 Pillow 仅在实际拼板时导入。字段、路径与资源上限见 [CAD-22 离线候选说明](<docs/development/cad22_candidates.md>)。教学 fixture 不证明真实八候选生成、两方向有效、mask 可靠或真实组内导入；这些验收仍未满足。
 
 有限离线风格配置：`python3 core/cwb.py style --help`。版本化 `style_tokens` **仅存独立 sidecar，不在项目主状态**；支持参考图摘要/锁定历史、显式提示片段导出和复用 #23 的同尺度人工标杆比较。契约与未完成门槛见 [CAD-26 风格工具](<docs/development/cad26_style.md>)；不自动改生成请求，不保证跨图一致性，未运行两个角色生成。
