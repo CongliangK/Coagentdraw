@@ -20,8 +20,9 @@ POST_ROUTES = {
     "/doc/new": (ops.doc_new, ("name", "width", "height"), ()),
     "/doc/save": (ops.doc_save_as, ("path",), ()),
     "/layer/png": (ops.layer_png, ("id", "path"), ()),
+    "/layer/group": (ops.layer_group, ("name",), ("parent_id", "above")),
     "/layer/add": (ops.layer_add, ("png_path", "name"),
-                   ("above", "offset_x", "offset_y")),
+                   ("above", "offset_x", "offset_y", "parent_id")),
     "/layer/visible": (ops.layer_set_visible, ("id", "visible"), ()),
     "/layer/rename": (ops.layer_rename, ("id", "name"), ()),
 }
