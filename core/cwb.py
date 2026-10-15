@@ -128,6 +128,59 @@ def add_review_parser(sub):
     p.add_argument("output", help="全新导出目录：Markdown + JSON + 原始反馈；不覆盖历史")
 
 
+def add_style_parser(sub):
+    parser = sub.add_parser("style", help="离线版本化风格 sidecar/提示/标杆比较；不生成、不写项目主状态")
+    commands = parser.add_subparsers(dest="style_cmd", required=True)
+    for command in ("init", "show", "edit", "state", "prompt", "compare"):
+        p = commands.add_parser(command)
+        p.add_argument("root", help="已有 CAD-19 项目目录；固定独立 style_tokens.cwb sidecar")
+        if command in ("init", "edit", "state"):
+            p.add_argument("--actor", required=True, help="人工记录操作者；不验证身份")
+            p.add_argument("--reason", required=True)
+        if command in ("edit", "state"):
+            p.add_argument("--expect-revision", type=int, required=True)
+        if command == "edit":
+            p.add_argument("--config", required=True, help="完整 JSON 配置；未知字段/删除/锁定修改拒绝")
+        elif command == "state":
+            p.add_argument("kind", choices=("references", "style_tokens"))
+            p.add_argument("id")
+            p.add_argument("action", choices=("lock", "unlock", "cancel", "enable"))
+        if command in ("prompt", "compare"):
+            p.add_argument("--scope", required=True, help="具体作品范围；精确匹配或配置的全局 *")
+        if command == "prompt":
+            p.add_argument("--output", help="可选显式导出 JSON 新文件；不覆盖，不接入生成")
+        elif command == "compare":
+            p.add_argument("current", help="手工当前 PNG；与所选参考原始尺寸须相同")
+            p.add_argument("output", help="尚不存在的 CAD-23 比较目录；左参考、右当前")
+            p.add_argument("--reference", required=True, help="显式选择唯一参考 id")
+            p.add_argument("--crop", type=int, nargs=4, required=True, metavar=("X", "Y", "W", "H"))
+            p.add_argument("--candidate-version", help="手工版本；未知则 null")
+            for name in ("palette", "proportion", "dominant-shape", "detail-density"):
+                p.add_argument("--" + name, help="人工比较文字；省略为未评审，不自动艺术评分")
+
+
+def add_candidates_parser(sub):
+    parser = sub.add_parser("candidates", help="有限离线候选计划/现成剪影拼板；不生成、不写 Krita")
+    commands = parser.add_subparsers(dest="candidates_cmd", required=True)
+    p = commands.add_parser("plan", help="稳定编号/seed 的 prepared_not_executed 计划；无需 Pillow")
+    p.add_argument("prompt")
+    p.add_argument("output", help="尚不存在的目录；父目录须存在，旧输出不覆盖")
+    p.add_argument("--count", type=int, required=True)
+    p.add_argument("--seed-start", type=int, required=True)
+    p.add_argument("--seed-end", type=int, required=True)
+    p.add_argument("--direction", action="append", default=[], help="人工概念方向，轮流分配；省略为未知")
+    p.add_argument("--workflow-source", help="人工来源说明；不读取工作流、不执行")
+    p = commands.add_parser("board", help="显式 SHA 登记的透明黑 PNG → contain 拼板；失败保留占位/退出 2")
+    p.add_argument("plan", help="plan 输出的 manifest.json")
+    p.add_argument("registration", help="逐候选显式登记 JSON；未知 seed/方向/工作流用 null")
+    p.add_argument("output", help="尚不存在的目录；父目录须存在，旧输出不覆盖")
+    p.add_argument("--columns", type=int, default=4)
+    p.add_argument("--cell-width", type=int, default=256)
+    p.add_argument("--cell-height", type=int, default=256)
+    p.add_argument("--select", action="append", default=[], help="入选候选 ID；仅导出清单/新层 payload")
+    p.add_argument("--parent-ref", help="未验证的目标组 ID；不连接 Krita")
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -153,6 +206,11 @@ def main(argv=None):
     p.add_argument("--above"); p.add_argument("--x", type=int, default=0)
     p.add_argument("--y", type=int, default=0)
     p.add_argument("--parent", help="父级组 ID；省略则挂到根")
+    placement = p.add_mutually_exclusive_group()
+    placement.add_argument("--mode", choices=("keep_size", "fit_canvas", "insert_at_offset"),
+                           help="原尺寸原点 / 等比缩小居中（不放大） / 原尺寸偏移；默认兼容已有 offset")
+    placement.add_argument("--fit-canvas", action="store_true", default=None,
+                           help="--mode fit_canvas 的兼容别名，不可搭配非零 --x/--y")
     p = sub.add_parser("group", help="创建空图层组（可嵌套）")
     p.add_argument("name")
     p.add_argument("--parent", help="父级组 ID；省略则挂到根")
@@ -188,6 +246,8 @@ def main(argv=None):
     add_project_parser(sub)
     add_stage_parser(sub)
     add_compare_parser(sub)
+    add_candidates_parser(sub)
+    add_style_parser(sub)
     add_review_parser(sub)
     p = sub.add_parser("export-project", help="离线复制明确选定的正式成果，不上传")
     p.add_argument("root", help="项目根目录")
@@ -199,7 +259,13 @@ def main(argv=None):
     p.add_argument("--zip", action="store_true", help="仅生成本地 ZIP")
 
     a = ap.parse_args(argv)
-    if a.cmd == "review":
+    if a.cmd == "candidates":
+        from cwb_candidates import run as run_candidates
+        run_candidates(a)
+    elif a.cmd == "style":
+        from cwb_style import run as run_style
+        run_style(a)
+    elif a.cmd == "review":
         from cwb_review import run as run_review
         run_review(a)
     elif a.cmd == "compare":
@@ -243,11 +309,13 @@ def main(argv=None):
                               {"name": a.name, "width": a.w, "height": a.h}),
                           ensure_ascii=False))
     elif a.cmd == "add":
-        print(json.dumps(http(Krita + "/layer/add", {
-            "png_path": os.path.abspath(a.png), "name": a.name,
-            "above": a.above, "offset_x": a.x, "offset_y": a.y,
-            "parent_id": a.parent,
-        }, timeout=120), ensure_ascii=False))
+        payload = {"png_path": os.path.abspath(os.path.expanduser(a.png)), "name": a.name,
+                   "above": a.above, "offset_x": a.x, "offset_y": a.y, "parent_id": a.parent}
+        if a.mode is not None:
+            payload["mode"] = a.mode
+        if a.fit_canvas is not None:
+            payload["fit_canvas"] = a.fit_canvas
+        print(json.dumps(http(Krita + "/layer/add", payload, timeout=120), ensure_ascii=False))
     elif a.cmd == "group":
         print(json.dumps(http(Krita + "/layer/group", {
             "name": a.name, "parent_id": a.parent, "above": a.above,
