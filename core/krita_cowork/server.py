@@ -28,6 +28,9 @@ POST_ROUTES = {
     "/layer/group": (ops.layer_group, ("name",), ("parent_id", "above")),
     "/layer/add": (ops.layer_add, ("png_path", "name"),
                    ("above", "offset_x", "offset_y", "parent_id", "mode", "fit_canvas")),
+    "/layer/vector": (ops.layer_vector,
+                      ("svg", "name", "target_document", "canvas", "dpi", "dedicated_document"),
+                      ("parent_id", "above")),
     "/layer/props": (ops.layer_props, ("id",), ("alpha_locked", "opacity", "blending_mode")),
     "/layer/visible": (ops.layer_set_visible, ("id", "visible"), ()),
     "/layer/rename": (ops.layer_rename, ("id", "name"), ()),
@@ -109,6 +112,9 @@ class ControlServer(object):
                 except ValueError:
                     self.close_connection = True
                     raise ops.OpError("Content-Length 非数字")
+                if self.path.split("?")[0].rstrip("/") == "/layer/vector" and not 1 <= length <= 131072:
+                    self.close_connection = True
+                    raise ops.OpError("vector JSON body 必须为 1..128KiB")
                 try:
                     data = json.loads(self.rfile.read(length) or b"{}")
                 except ValueError:
@@ -132,10 +138,10 @@ class ControlServer(object):
                 missing = [k for k in required if k not in data]
                 if missing:
                     raise ops.OpError("缺少必填参数: {0}".format(", ".join(missing)))
-                if path == "/layer/props":
+                if path in ("/layer/props", "/layer/vector"):
                     unknown = set(data) - set(required + optional)
-                    if unknown or not any(k in data for k in optional):
-                        raise ops.OpError("props 需要至少一个已知属性,不接受未知字段")
+                    if unknown or (path == "/layer/props" and not any(k in data for k in optional)):
+                        raise ops.OpError("需要已知字段/属性,不接受未知字段")
                 kwargs = {ALIAS.get(k, k): data[k]
                           for k in required + optional if k in data}
                 return fn, kwargs

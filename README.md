@@ -57,6 +57,7 @@
 | `/layer/png` | POST | 图层像素导出 PNG |
 | `/layer/group` | POST | 新建图层组，可用 parent_id 嵌套、above 定位同级 |
 | `/layer/add` | POST | PNG → 新透明 paint 图层（keep_size / fit_canvas / insert_at_offset，保留 parent_id/above/offset） |
+| `/layer/vector` | POST | 受控短文字/line/rect SVG → 新 vectorlayer；仅明确专用已保存活动文档，严格结构回读，不承诺实机编辑 |
 | `/layer/visible` `/layer/rename` | POST | 可见性 / 重命名 |
 | `/layer/props` | POST | Alpha Lock / 0..1 不透明度 / 稳定 ID 混合模式（写后回读，非原子事务） |
 
@@ -85,6 +86,8 @@ python3 core/cwb.py save 作品.kra
 确定性八阶段图层组：`python3 core/cwb.py stage --help`。需显式已保存文档与独立身份 sidecar；同名不接管、只补未登记组，重开降级/部分失败及已有诊断 PNG 导入边界见 [CAD-21 阶段组织](docs/development/cad21_stage.md)（未实机验证保存/重开）。
 
 最小离线文件比较：`python3 core/cwb.py compare --help`。接受手工 before/after PNG，原尺度共同裁切、来源 SHA256 和非破坏性决定事件见 [CAD-23 比较说明](<docs/development/cad23_compare.md>)。仅 `create` 使用外部 CLI 可选 Pillow；所有决定仅记录，不实际隐藏/恢复 Krita 投影，不代表 #17 完成或 #25 联调。
+
+已有主图、前/侧/背与两个装备拆解的最小离线设定页：`python3 core/cwb.py layout --help`。`fixture` 仅教学占位、非真实角色；`plan/render/prepare` 保留来源 SHA、六张独立 PNG、标注 SVG 与人工执行 payload，不自动写 Krita/生成三视图/保证一致性。`render` 才延迟使用 CLI-only 可选 Pillow。受控矢量入口、300 DPI points 映射、部分写入与 B 门槛见 [CAD-28 排版说明](<docs/development/cad28_layout.md>)；Krita 真正改字/齐线/字体与 KRA 保存重开均未验，不关闭 #28。本项仅将同级 `above` 扩展到 vectorlayer，`props` 为 vectorlayer 开放能力守卫下的 opacity/blending_mode，Alpha Lock/root/其他类型守卫不放开。
 
 环境变量：
 
