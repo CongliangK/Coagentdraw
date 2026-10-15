@@ -57,7 +57,7 @@ def _find_node(doc, layer_id, allow_root=False):
     stack = [root]
     while stack:
         n = stack.pop()
-        if _node_id(n) == want or _node_id(n) == _normalize(want):
+        if _normalize(_node_id(n)) == _normalize(want):
             if n is root and not allow_root:
                 raise OpError("root 图层不可作为操作目标")
             return n
@@ -168,7 +168,61 @@ def doc_new(name, width, height):
     return {"name": doc.name(), "width": width, "height": height}
 
 
-def layer_add(png_path, name, above_layer_id=None, offset_x=0, offset_y=0):
+def _insertion_target(doc, parent_id, above_layer_id):
+    """root 仅能作为默认容器;显式父级只能是组,above 只能是同级。"""
+    parent = doc.rootNode() if parent_id is None else _find_node(doc, parent_id)
+    if parent_id is not None and parent.type() != "grouplayer":
+        raise OpError("parent_id 必须指向 groupLayer")
+    above = None if above_layer_id is None else _find_node(doc, above_layer_id)
+    if above is not None:
+        if above.type() not in ("grouplayer", "paintlayer"):
+            raise OpError("above 仅支持 groupLayer/paintLayer")
+        if _node_id(above) not in [_node_id(n) for n in parent.childNodes()]:
+            raise OpError("above 必须是指定父级的直接子节点")
+    return parent, above
+
+
+def _verify_attached(doc, parent, node, above):
+    """从文档实际树回读,不信任 createNode 返回的游离节点。"""
+    try:
+        actual = _find_node(doc, _node_id(node))
+        actual_parent = _find_node(doc, _node_id(parent), allow_root=True)
+    except NotFoundError as exc:
+        raise OpError("创建后树结构异常: {0}".format(exc)) from exc
+    children = [_node_id(n) for n in actual_parent.childNodes()]
+    if _node_id(actual) not in children:
+        raise OpError("创建后树结构异常: 新节点未挂到指定父级")
+    if above is not None:
+        if (_node_id(above) not in children or
+                children.index(_node_id(actual)) != children.index(_node_id(above)) + 1):
+            raise OpError("创建后树结构异常: above 顺序不符")
+    if actual.type() != node.type():
+        raise OpError("创建后树结构异常: 节点类型不符")
+    return actual
+
+
+def _create_attached(doc, name, node_type, parent, above):
+    node = doc.createNode(str(name), node_type)
+    if node is None or node.type() != node_type.lower():
+        raise OpError("createNode 失败或节点类型不符: {0}".format(node_type))
+    if not parent.addChildNode(node, above):
+        raise OpError("addChildNode 失败: {0}".format(_node_id(node)))
+    return _verify_attached(doc, parent, node, above)
+
+
+def layer_group(name, parent_id=None, above_layer_id=None):
+    """新建空 groupLayer,可嵌套;不移动/合并已有图层。"""
+    doc = _active_doc()
+    _check_rgba8(doc)
+    parent, above = _insertion_target(doc, parent_id, above_layer_id)
+    node = _create_attached(doc, name, "groupLayer", parent, above)
+    doc.refreshProjection()
+    return {"id": _node_id(node), "name": node.name(), "type": node.type(),
+            "parent_id": _node_id(parent)}
+
+
+def layer_add(png_path, name, above_layer_id=None, offset_x=0, offset_y=0,
+              parent_id=None):
     """PNG → 新 paint layer(非破坏式,不动既有图层)。返回新图层 id。"""
     doc = _active_doc()
     _check_rgba8(doc)
@@ -198,13 +252,14 @@ def layer_add(png_path, name, above_layer_id=None, offset_x=0, offset_y=0):
     for r in range(h):  # 逐行拷贝,规避行尾对齐填充
         buf[r * w * 4:(r + 1) * w * 4] = raw[r * bpl:r * bpl + w * 4]
 
-    parent = doc.rootNode()
-    above_node = _find_node(doc, above_layer_id) if above_layer_id else None
-    layer = doc.createNode(str(name), "paintLayer")
-    parent.addChildNode(layer, above_node)  # 先挂树
-    layer.setPixelData(bytes(buf), off_x, off_y, w, h)
+    parent, above_node = _insertion_target(doc, parent_id, above_layer_id)
+    layer = _create_attached(doc, name, "paintLayer", parent, above_node)
+    if not layer.setPixelData(bytes(buf), off_x, off_y, w, h):
+        raise OpError("setPixelData 失败;新图层可能已挂树: {0}".format(_node_id(layer)))
+    layer = _verify_attached(doc, parent, layer, above_node)
     doc.refreshProjection()
-    return {"id": _node_id(layer), "name": str(name), "width": w, "height": h}
+    return {"id": _node_id(layer), "name": layer.name(), "width": w, "height": h,
+            "parent_id": _node_id(parent)}
 
 
 def layer_set_visible(layer_id, visible):

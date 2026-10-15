@@ -53,8 +53,11 @@
 | `/ping` `/docs` `/layers` | GET | 心跳 / 文档列表 / 图层树(id 来自 uniqueId) |
 | `/doc/new` `/doc/save` | POST | 新建 RGBA8 文档 / 另存 .kra |
 | `/layer/png` | POST | 图层像素导出 PNG |
-| `/layer/add` | POST | PNG → 新 paint 图层(非破坏式,可指定 above/offset) |
+| `/layer/group` | POST | 新建图层组，可用 parent_id 嵌套、above 定位同级 |
+| `/layer/add` | POST | PNG → 新 paint 图层(非破坏式,可指定 parent_id/above/offset) |
 | `/layer/visible` `/layer/rename` | POST | 可见性 / 重命名 |
+
+图层组与组内 PNG 导入的参数约束、CLI 示例及真实 Krita 验收步骤见 [CAD-11 图层组说明](docs/development/cad11_layer_groups.md)。
 
 ## cwb 用法
 
