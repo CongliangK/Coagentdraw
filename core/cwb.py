@@ -81,6 +81,11 @@ def main(argv=None):
     p = sub.add_parser("add"); p.add_argument("png"); p.add_argument("name")
     p.add_argument("--above"); p.add_argument("--x", type=int, default=0)
     p.add_argument("--y", type=int, default=0)
+    p.add_argument("--parent", help="父级组 ID；省略则挂到根")
+    p = sub.add_parser("group", help="创建空图层组（可嵌套）")
+    p.add_argument("name")
+    p.add_argument("--parent", help="父级组 ID；省略则挂到根")
+    p.add_argument("--above", help="父级中的同级节点 ID")
     p = sub.add_parser("visible"); p.add_argument("id"); p.add_argument("v")
     p = sub.add_parser("save"); p.add_argument("path")
     for command, default in (("comfy-t2i", "wf_qwen21_t2i_api.json"),
@@ -139,7 +144,12 @@ def main(argv=None):
         print(json.dumps(http(Krita + "/layer/add", {
             "png_path": os.path.abspath(a.png), "name": a.name,
             "above": a.above, "offset_x": a.x, "offset_y": a.y,
+            "parent_id": a.parent,
         }, timeout=120), ensure_ascii=False))
+    elif a.cmd == "group":
+        print(json.dumps(http(Krita + "/layer/group", {
+            "name": a.name, "parent_id": a.parent, "above": a.above,
+        }), ensure_ascii=False))
     elif a.cmd == "visible":
         print(json.dumps(http(Krita + "/layer/visible",
                               {"id": a.id, "visible": a.v in ("1", "true")}),
