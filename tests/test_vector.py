@@ -24,6 +24,22 @@ def svg(dpi=300):
             '</svg>')
 
 
+# Source-protocol samples, NOT captured Krita output. Shape.cpp:172-190,
+# SvgWriter.cpp:227-238 and KoPathShape.cpp:480-490/1070-1149 at official
+# 0ddbd236974da74a59f85d799e22915eb208e1c5: detached points, normalized
+# M/L geometry + transform + ID/nodetypes. Factories take priority over fallback;
+# this does not assert the installed line/rect/text factory's actual spelling.
+NATIVE = [
+    '<text id="shape0" transform="matrix(.24 0 0 .24 0 0)" x="10.0" y="20" '
+    'style="font-size:12;font-family:sans-serif;fill:#202830">肩 &amp; waist</text>',
+    '<path id="shape0" transform="matrix(.24 0 0 .24 2.4 7.2)" '
+    'style="fill:none;stroke:#657580;stroke-width:1;stroke-linecap:butt;'
+    'stroke-linejoin:miter;stroke-miterlimit:4" d="M0 0L80 0" sodipodi:nodetypes="cc"/>',
+    '<rect id="shape0" transform="translate(2.4 9.6)" x="0" y="0" width="4.8" height="7.2" '
+    'fill="none" stroke="#657580" stroke-width=".24"/>',
+]
+
+
 class Shape:
     def __init__(self, source):
         self.source = source
@@ -42,6 +58,12 @@ class VectorNode(props.Node):
     def addShapesFromSvg(self, source):
         assert isinstance(source, str)
         root = ET.fromstring(source)
+        # Offline native-coordinate protocol double, never raw XML echo.
+        # Uses requested physical mapping, not a claim about factory spelling.
+        scale = float(root.get('width')[:-2]) / float(root.get('viewBox').split()[2])
+        for el in root:
+            el.set('transform', 'matrix({0} 0 0 {0} 0 0)'.format(scale))
+            el.set('id', 'shape0')
         self.contents = [Shape(ET.tostring(el, encoding='unicode')) for el in root]
         if self.import_mode == 'empty':
             self.contents = []
@@ -103,7 +125,9 @@ class Validation(unittest.TestCase):
                    '<?xml-stylesheet href="https://example.org/style"?>',
                    '<script>alert(1)</script>', '<foreignObject/>', '<use href="#x"/>',
                    '<image href="https://remote/image.png"/>', '<path d="M0 0L1 1"/>',
-                   '<style>text{fill:url(file:///x)}</style>', '<g><line/></g>']
+                   '<style>text{fill:url(file:///x)}</style>', '<g><line/></g>',
+                   '<svg width="garbage" height="-1pt" viewBox="infinite"/>',
+                   '<svg width="24pt" height="48pt" viewBox="0 0 100 200"/>']
         for attack in attacks:
             with self.subTest(attack=attack), self.assertRaises(ValueError):
                 vector.validate_svg(svg().replace('</svg>', attack + '</svg>'), [100, 200], [300, 300])
@@ -214,6 +238,66 @@ class Operations(unittest.TestCase):
             with self.assertRaises(ops.PropsWriteError) as error:
                 self.call()
             self.assertEqual(error.exception.payload['failed'], 'readback')
+
+    def test_official_detached_protocol_line_path_and_numeric_rewrite(self):
+        with patch.object(VectorNode, 'shapes', return_value=[Shape(s) for s in NATIVE]):
+            result = self.call()
+        self.assertEqual(result['status'], 'structural_readback_only')
+        self.assertFalse(result['krita_editing_verified'])
+        # Also accept a strict complete input-coordinate wrapper, and a native
+        # line (factory success need not use the KoPath fallback).
+        for shapes in ([Shape(svg())], [Shape(NATIVE[0]), Shape(
+                '<line xmlns="http://www.w3.org/2000/svg" id="shape0" '
+                'x1="2.40" y1="7.2" x2="21.6" y2="7.2" stroke="#657580" stroke-width="2.4e-1"/>'),
+                Shape(NATIVE[2])]):
+            with patch.object(VectorNode, 'shapes', return_value=shapes):
+                self.assertEqual(self.call()['status'], 'structural_readback_only')
+
+    def test_complete_readback_rejects_descendants_tail_extra_roots_and_unknowns(self):
+        original = ET.fromstring(svg())
+        echo_attacks = [
+            svg().replace('</text>', '<tspan x="9999">EXTRA</tspan></text>'),
+            svg().replace('</text>', '<tspan/>EXTRA</text>'),
+            svg().replace('</text>', '</text>TAIL'),
+            svg().replace('><text', '>EXTRA<text'),
+        ]
+        for attack in echo_attacks:
+            with self.subTest(echo_attack=attack):
+                with patch.object(VectorNode, 'shapes', return_value=[Shape(attack)]):
+                    with self.assertRaises(ops.PropsWriteError):
+                        self.call()
+        attacks = [
+            ET.tostring(original[0], encoding='unicode') + 'TAIL',
+            NATIVE[0].replace('</text>', '<tspan/>EXTRA</text>'),
+            NATIVE[0].replace('</text>', '<rect width="1" height="1"/></text>'),
+            '<svg width="garbage" height="-1pt" viewBox="infinite"/>',
+            NATIVE[1] + '<rect x="0" y="0" width="1" height="1"/>',
+            NATIVE[1].replace('M0 0L80 0', 'M0 0L80 0L0 9'),
+            NATIVE[1].replace('M0 0L80 0', 'M0 0C1 2 3 4 80 0'),
+            NATIVE[1].replace('stroke:#657580', 'stroke:url(file:///x)'),
+            NATIVE[1].replace('stroke-width:1', 'stroke-width:2'),
+            NATIVE[1].replace('stroke-width:1', 'stroke-width:1;filter:none'),
+            NATIVE[1].replace('matrix(.24 0 0 .24 2.4 7.2)', 'matrix(.24 0 0 .24 999 7.2)'),
+            NATIVE[1].replace('matrix(.24 0 0 .24 2.4 7.2)', 'rotate(20)'),
+            NATIVE[1].replace('<path ', '<path xmlns="urn:evil" '),
+            NATIVE[1].replace('stroke-width:1', 'stroke-width:1;opacity:0'),
+            NATIVE[1].replace('stroke-width:1', 'stroke-width:1;stroke-width:1'),
+            NATIVE[1].replace('stroke-width:1', 'stroke-width:1;vector-effect:non-scaling-stroke'),
+            NATIVE[1].replace('M0 0L80 0', 'M0 0L80 0Z'),
+            NATIVE[1].replace('cc', 'cs'),
+        ]
+        for index, attack in enumerate(attacks):
+            with self.subTest(attack=attack):
+                sources = list(NATIVE)
+                sources[0 if index < 4 else 1] = attack
+                shapes = [Shape(source) for source in sources]
+                with patch.object(VectorNode, 'shapes', return_value=shapes):
+                    with patch.object(self.doc, 'refreshProjection') as refresh:
+                        with self.assertRaises(ops.PropsWriteError) as error:
+                            self.call()
+                        self.assertEqual(error.exception.payload['failed'], 'readback')
+                        refresh.assert_not_called()
+                self.assertIs(self.doc.root.children[0], self.old)
 
     def test_readback_svg_wrapper_cannot_hide_changed_physical_mapping(self):
         changed = svg().replace('width="24pt"', 'width="48pt"')

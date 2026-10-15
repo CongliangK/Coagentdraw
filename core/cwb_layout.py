@@ -1,4 +1,4 @@
-"""CAD-28 offline six-image layout. No network; Pillow is render-only/CLI-only.
+"""CAD-28 offline six-image layout. No network; Pillow is render/prepare CLI-only.
 
 Pure placement/vector files are loaded without importing the Krita plugin package.
 All outputs are exclusive new assets; an interrupted bundle remains incomplete.
@@ -235,6 +235,8 @@ def _collect(spec_path):
         source_path = item["path"]
         if not isinstance(source_path, str):
             raise ValueError("image path 必须为文字")
+        # Reject spelling aliases BEFORE Path discards ./ or repeated slashes.
+        _absolute(source_path)
         if not os.path.isabs(source_path):
             source_path = str(Path(source[0]["path"]).parent / source_path)
         budget = placement.PreprocessBudget()
@@ -289,7 +291,7 @@ def plan(spec_path):
 
 def render(spec_path, output):
     manifest, svg, captures = _collect(spec_path)
-    # Optional dependency never enters the plugin, plan, prepare or help paths.
+    # Optional dependency never enters the plugin, plan, fixture or help paths.
     try:
         from PIL import Image
     except ImportError as exc:
@@ -342,6 +344,53 @@ def render(spec_path, output):
     return {"output": absolute, "fixture": manifest["fixture"], "notice": NOTICE}
 
 
+def _rgba(encoded, size, budget):
+    """Decode only the CAD-14 checked snapshot; CLI-only optional dependency."""
+    try:
+        from PIL import Image
+    except ImportError as exc:
+        raise ValueError("layout prepare 需要 CLI-only 可选 Pillow 核验像素；不会自动安装") from exc
+    try:
+        with io.BytesIO(encoded) as stream, Image.open(stream) as image:
+            if image.format != "PNG" or list(image.size) != size:
+                raise ValueError("PNG 解码尺寸/格式与已核布局不符")
+            image.load()
+            budget.check("prepare PNG 解码后")
+            with image.convert("RGBA") as rgba:
+                budget.check("prepare RGBA 转换后")
+                # As in render, release decoder storage before packing bytes;
+                # never hold decoder + RGBA + packed whole-source copies.
+                image.close()
+                data = rgba.tobytes()
+        budget.check("prepare RGBA 打包后")
+        return data
+    except (OSError, SyntaxError) as exc:
+        raise ValueError("PNG 像素解码失败") from exc
+
+
+def _verify_rendered(placement, source, rendered, item):
+    # Local consistency, NOT authentication against a same-UID writer. Derive
+    # expected bytes from the rechecked original source and production CAD-14
+    # sampler; a rewritten manifest SHA cannot authorize different pixels.
+    budget = placement.PreprocessBudget()
+    encoded, mapping = _prepare_png(placement, source, *item["cell"][2:], budget)
+    if mapping != item["resize"]:
+        raise ValueError("prepare 重新采样布局改变")
+    raw = _rgba(encoded, mapping["source_size"], budget)
+    del encoded
+    expected = placement.resize_rgba(raw, mapping, budget=budget)
+    del raw
+    size = mapping["output_size"]
+    encoded, actual_mapping = _prepare_png(placement, rendered, *size, budget)
+    if actual_mapping["source_size"] != size:
+        raise ValueError("渲染 PNG 尺寸与布局不符")
+    actual = _rgba(encoded, size, budget)
+    del encoded
+    if actual != expected:  # Includes RGB hidden under zero alpha.
+        raise ValueError("渲染 PNG 像素与原源及 CAD-14 采样不符")
+    budget.check("prepare 像素核验后")
+
+
 def prepare(bundle, target_document):
     """Return manual request sequence only; absolutely no HTTP/apply implementation."""
     bundle = _absolute(bundle)
@@ -353,7 +402,8 @@ def prepare(bundle, target_document):
     if manifest["schema"] != SCHEMA or manifest["krita_verified"] is not False:
         raise ValueError("未知或伪造验收状态")
     # Re-plan from ORIGINAL sources; reject source changes, not just stale copies.
-    current, svg, _ = _collect(manifest["spec"]["path"])
+    current, svg, sources = _collect(manifest["spec"]["path"])
+    placement = _pure("placement")
     if ({k: v for k, v in current.items() if k != "images"} !=
             {k: v for k, v in manifest.items() if k != "images"}):
         raise ValueError("来源/布局改变，须创建新 bundle")
@@ -362,9 +412,9 @@ def prepare(bundle, target_document):
     source_copy = _capture(bundle + "/source.json", 65536)
     if source_copy[0]["sha256"] != manifest["spec"]["sha256"]:
         raise ValueError("保留的布局源改变")
-    checks = [capture, source_copy]
+    checks = [capture, source_copy, *sources]
     requests = []
-    for expected, item in zip(current["images"], manifest["images"]):
+    for expected, item, source in zip(current["images"], manifest["images"], sources[1:]):
         if {k: v for k, v in item.items() if k != "rendered_sha256"} != expected:
             raise ValueError("布局 manifest 改变")
         for field, sha in (("original", item["source"]["sha256"]),
@@ -373,6 +423,8 @@ def prepare(bundle, target_document):
             if captured[0]["sha256"] != sha:
                 raise ValueError("bundle 资产改变")
             checks.append((captured[0], b"", captured[2]))
+            if field == "rendered":
+                _verify_rendered(placement, source, captured, expected)
             del captured
         x, y = item["placement"]["origin"]
         requests.append({"route": "/layer/add", "payload": {"png_path": bundle + "/" + item["rendered"],
@@ -386,6 +438,7 @@ def prepare(bundle, target_document):
         "target_document": target_document, "dedicated_document": True}})
     _unchanged(checks)
     return {"manual_only": True, "target_document": target_document,
+            "asset_verification": "local_rgba_consistency_only",
             "warning": "未执行。先人工确认专用已保存活动文档尺寸/DPI；每次PNG请求无文档锁，逐步回读，失败停止不重试。" + NOTICE,
             "requests": requests}
 

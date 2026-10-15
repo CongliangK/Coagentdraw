@@ -182,6 +182,7 @@ class Layout(unittest.TestCase):
         with patch.object(cwb, 'http', side_effect=AssertionError('network')):
             prepared = layout.prepare(str(self.output), '/dedicated/test.kra')
         self.assertTrue(prepared['manual_only'])
+        self.assertEqual(prepared['asset_verification'], 'local_rgba_consistency_only')
         self.assertEqual([r['route'] for r in prepared['requests']], ['/layer/add'] * 6 + ['/layer/vector'])
         self.assertTrue(prepared['requests'][-1]['payload']['dedicated_document'])
         for item, request in zip(manifest['images'], prepared['requests']):
@@ -221,6 +222,79 @@ class Layout(unittest.TestCase):
         self.assertFalse((second / 'manifest.json').exists())
         with self.assertRaises(OSError):
             layout.prepare(str(second), '/dedicated/test.kra')
+
+    def test_source_lexical_aliases_rejected_before_path_normalization(self):
+        for alias in ('./main.png', 'main.png//', 'sub//main.png', 'sub/../main.png'):
+            self.spec['images']['main']['path'] = alias
+            self.save()
+            with self.subTest(alias=alias), self.assertRaises(ValueError):
+                layout.plan(str(self.spec_path))
+
+    @unittest.skipUnless(PIL_AVAILABLE, 'optional CLI Pillow absent; no install')
+    def test_prepare_recomputes_pixels_not_self_reported_sha(self):
+        from PIL import Image
+        layout.render(str(self.spec_path), str(self.output))
+        manifest_path = self.output / 'manifest.json'
+        manifest = json.loads(manifest_path.read_bytes())
+        path = self.output / 'main.png'
+        good = path.read_bytes()
+        import struct
+        import zlib
+        def chunk(kind, data):
+            return struct.pack('>I', len(data)) + kind + data + struct.pack('>I', zlib.crc32(kind + data))
+        huge_header = chunk(b'IHDR', struct.pack('>IIBBBBB', 8192, 8192, 8, 6, 0, 0, 0))
+        bad_stream = good[:33] + chunk(b'IDAT', b'invalid zlib') + chunk(b'IEND', b'')
+        replacements = [b'not a PNG', good[:-1], good[:50] + b'X' + good[51:],
+                        b'\x89PNG\r\n\x1a\n' + huge_header, bad_stream]
+        for size in ((1, 1), (100, 160)):
+            stream = io.BytesIO()
+            Image.new('RGBA', size, (255, 0, 0, 255)).save(stream, format='PNG')
+            replacements.append(stream.getvalue())
+        # Changing hidden RGB alone must also fail, even though visible output
+        # is identical; this is a byte-channel contract, not visual similarity.
+        with Image.open(io.BytesIO(good)) as image:
+            image.putpixel((0, 0), (99, 100, 180, 0))
+            stream = io.BytesIO()
+            image.save(stream, format='PNG')
+            replacements.append(stream.getvalue())
+        for data in replacements:
+            path.write_bytes(data)
+            manifest['images'][0]['rendered_sha256'] = layout._sha(data)
+            manifest_path.write_bytes(layout._json(manifest))
+            with self.subTest(size=len(data)), self.assertRaises(ValueError):
+                layout.prepare(str(self.output), '/dedicated/test.kra')
+        # Lossless re-encoding is acceptable: compare decoded RGBA, not encoder
+        # spelling. The expected content is derived from original sources.
+        with Image.open(io.BytesIO(good)) as image:
+            stream = io.BytesIO()
+            image.save(stream, format='PNG', compress_level=0)
+        data = stream.getvalue()
+        path.write_bytes(data)
+        manifest['images'][0]['rendered_sha256'] = layout._sha(data)
+        manifest_path.write_bytes(layout._json(manifest))
+        self.assertEqual(len(layout.prepare(str(self.output), '/dedicated/test.kra')['requests']), 7)
+
+    @unittest.skipUnless(PIL_AVAILABLE, 'optional CLI Pillow absent; no install')
+    def test_prepare_downscale_is_production_sampling_and_missing_decoder_fails_closed(self):
+        from PIL import Image
+        raw = bytes(v for y in range(5) for x in range(7)
+                    for v in (x, y, 100, 0 if x == 0 else 200))
+        Image.frombytes('RGBA', (7, 5), raw).save(self.inputs / 'main.png')
+        self.spec['images']['main'].update(cell=[10, 30, 4, 3], anchor_source=[0, 0], anchor_target=[10, 30])
+        self.save()
+        layout.render(str(self.spec_path), str(self.output))
+        self.assertEqual(len(layout.prepare(str(self.output), '/dedicated/test.kra')['requests']), 7)
+        with Image.open(self.output / 'main.png') as image:
+            expected = bytes(v for y in (1, 3) for x in (0, 2, 4, 6)
+                             for v in (x, y, 100, 0 if x == 0 else 200))
+            self.assertEqual(image.tobytes(), expected)
+        real_import = builtins.__import__
+        def no_pillow(name, *args, **kwargs):
+            if name == 'PIL' or name.startswith('PIL.'):
+                raise ImportError('optional decoder unavailable')
+            return real_import(name, *args, **kwargs)
+        with patch('builtins.__import__', side_effect=no_pillow), self.assertRaisesRegex(ValueError, 'Pillow'):
+            layout.prepare(str(self.output), '/dedicated/test.kra')
 
     def test_empty_cell_area_is_not_an_image_sampling_allocation(self):
         self.spec['canvas'] = [19000, 4000]

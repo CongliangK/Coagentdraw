@@ -3,7 +3,6 @@
 This is deliberately NOT a general SVG importer. Successful readback is only a
 structural check; font rendering, points alignment and GUI editing need Krita QA.
 """
-from collections import Counter
 import math
 import os
 import re
@@ -79,7 +78,8 @@ def validate_svg(svg, canvas, dpi):
     chars = 0
     for el in elements:
         tag = _tag(el)
-        if tag not in ATTRS or set(el.attrib) - ATTRS[tag]:
+        if (tag not in ATTRS or (tag == "svg" and el is not root) or
+                set(el.attrib) - ATTRS[tag]):
             raise VectorError("SVG 元素/属性不在白名单: " + tag)
         if el.tail and el.tail.strip():
             raise VectorError("仅 text 元素可含文字")
@@ -136,10 +136,174 @@ def validate_svg(svg, canvas, dpi):
     return root
 
 
-def _signature(root):
-    # Strict by design: if Krita rewrites line to path, styles or transforms,
-    # do not pretend we proved preservation. Caller reports unverified partial.
-    return Counter((_tag(el), tuple(sorted(el.attrib.items())), el.text or "") for el in list(root))
+# Readback dialect ONLY. Input remains validate_svg's flat text/line/rect.
+# Shape::toSvg(False,False) uses saveDetached, not VectorLayer::toSvg's page.
+# Official 0ddbd236: SvgWriter::savePath emits ID/transform/style/M,L/nodetypes;
+# KoPathShape::normalize moves the origin into the transform. Do not compare XML
+# spellings, accept arbitrary paths, or infer installed factory output from this.
+SODIPODI = "http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd"
+SIGNED = r"[-+]?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:[eE][-+]?[0-9]+)?"
+DEFAULT_STYLE = {"opacity": "1", "fill-opacity": "1", "stroke-opacity": "1",
+                 "stroke-linecap": "butt", "stroke-linejoin": "miter",
+                 "stroke-miterlimit": "4", "stroke-dasharray": "none",
+                 "stroke-dashoffset": "0", "fill-rule": "nonzero"}
+
+
+def _read_number(raw):
+    if not isinstance(raw, str) or not re.fullmatch(SIGNED, raw):
+        raise VectorError("未知回读数值")
+    value = float(raw)
+    return number(value, "回读数值", -MAX_NUMBER, MAX_NUMBER)
+
+
+def _numbers(raw, count):
+    # Complete grammar, not findall (which would silently skip garbage).
+    if not re.fullmatch(r"\s*" + SIGNED + r"(?:[\s,]+" + SIGNED + r")*\s*", raw):
+        raise VectorError("未知回读数值列表")
+    values = [_read_number(v) for v in re.split(r"[\s,]+", raw.strip())]
+    if len(values) != count:
+        raise VectorError("回读数值个数不符")
+    return values
+
+
+def _transform(raw):
+    # One positive uniform axis-aligned matrix only. No transform lists, skew,
+    # rotation, reflection, or non-uniform font/stroke scaling to approximate.
+    if raw is None:
+        return 1.0, 0.0, 0.0
+    match = re.fullmatch(r"\s*(matrix|translate|scale)\s*\(([^()]*)\)\s*", raw)
+    if not match:
+        raise VectorError("未知回读 transform")
+    kind, args = match.groups()
+    if kind == "matrix":
+        a, b, c, d, x, y = _numbers(args, 6)
+        if b != 0 or c != 0 or a != d:
+            raise VectorError("仅核验正均匀轴向变换")
+    elif kind == "translate":
+        x, y = _numbers(args, 2)
+        a = 1.0
+    else:
+        a, d = _numbers(args, 2) if re.search(r"[\s,]", args.strip()) else [_read_number(args.strip())] * 2
+        x = y = 0.0
+        if a != d:
+            raise VectorError("仅核验正均匀缩放")
+    if not 0 < a <= MAX_NUMBER:
+        raise VectorError("回读缩放越界")
+    return a, x, y
+
+
+def _semantic(el, unit_scale):
+    tag = _tag(el)
+    if tag not in ("text", "line", "rect", "path") or list(el):
+        # Explicitly reject ALL descendants, including empty tspan/metadata.
+        raise VectorError("未知回读元素/后代；不能证明等价")
+    if (el.tail or "").strip() or (tag != "text" and (el.text or "").strip()):
+        raise VectorError("回读含额外文字/tail")
+    attrs = dict(el.attrib)
+    identity = attrs.pop("id", None)
+    if identity is not None and not re.fullmatch(r"[\w.-]{1,120}", identity):
+        raise VectorError("未知回读 id")
+    nodes = attrs.pop("{" + SODIPODI + "}nodetypes", None)
+    if nodes is not None and (tag != "path" or nodes != "cc"):
+        raise VectorError("未知 path 节点类型")
+    scale, tx, ty = _transform(attrs.pop("transform", None))
+    style = attrs.pop("style", "")
+    if style:
+        declarations = style.split(";")
+        if not declarations[-1].strip():
+            declarations.pop()
+        for declaration in declarations:
+            parts = declaration.split(":")
+            if len(parts) != 2:
+                raise VectorError("未知回读 style")
+            key, value = (p.strip() for p in parts)
+            if key in attrs or not key or not value:
+                raise VectorError("重复/空回读 style")
+            attrs[key] = value
+    for key, default in DEFAULT_STYLE.items():
+        value = attrs.pop(key, default)
+        if (value != default and not (default in ("0", "1", "4") and
+                                      _read_number(value) == float(default))):
+            raise VectorError("回读绘制默认值改变: " + key)
+    kind = "line" if tag == "path" else tag
+    allowed = ATTRS[kind] | ({"d", "fill"} if tag == "path" else set())
+    if set(attrs) - allowed:
+        raise VectorError("未知回读绘制属性/命名空间")
+    if tag == "path":
+        # Exactly one open straight segment: no curves, relative commands,
+        # closure, implicit segments or additional subpaths. Entire d consumed.
+        match = re.fullmatch(r"\s*M\s*(.*?)\s*L\s*(.*?)\s*", attrs.pop("d", ""))
+        if not match:
+            raise VectorError("仅核验单一 M/L 直线 path")
+        points = [_numbers(v, 2) for v in match.groups()]
+        if attrs.pop("fill", "none") != "none":
+            raise VectorError("未知直线 path 填充")
+        # path may not also smuggle line coordinates.
+        if set(attrs) - {"stroke", "stroke-width"}:
+            raise VectorError("path 含多余几何")
+    elif tag == "line":
+        points = [[_read_number(attrs.pop(k)) for k in pair]
+                  for pair in (("x1", "y1"), ("x2", "y2"))]
+    else:
+        points = [[_read_number(attrs.pop(k)) for k in ("x", "y")]]
+    # Interleave x/y rather than losing endpoint associations.
+    geometry = [v for x, y in points for v in
+                ((x * scale + tx) * unit_scale, (y * scale + ty) * unit_scale)]
+    if tag == "rect":
+        geometry += [_read_number(attrs.pop(k)) * scale * unit_scale for k in ("width", "height")]
+        if min(geometry[-2:]) <= 0:
+            raise VectorError("回读 rect 非正尺寸")
+    if tag == "text":
+        geometry += [_read_number(attrs.pop("font-size")) * scale * unit_scale]
+        family = attrs.pop("font-family")
+        if not re.fullmatch(r"[\w -]{1,80}", family):
+            raise VectorError("未知回读字体")
+        content = el.text or ""
+        if not 1 <= len(content) <= 120 or any(ord(c) < 32 for c in content):
+            raise VectorError("回读文字非法")
+        strings = [content, family]
+    else:
+        geometry += [_read_number(attrs.pop("stroke-width")) * scale * unit_scale]
+        if geometry[-1] <= 0:
+            raise VectorError("回读线宽非正")
+        strings = []
+    for key in (("fill",) if tag == "text" else
+                ("fill", "stroke") if tag == "rect" else ("stroke",)):
+        value = attrs.pop(key)
+        if not re.fullmatch(r"#[0-9a-fA-F]{6}|none", value):
+            raise VectorError("未知回读颜色/外链")
+        strings.append(value.lower())
+    if attrs or any(not math.isfinite(v) or abs(v) > MAX_NUMBER for v in geometry):
+        raise VectorError("未知回读属性/变换后超界")
+    return kind, geometry, strings
+
+
+def _readback(exported, canvas, dpi):
+    if re.search(r"<!|<\?|url\s*\(|href\s*=", exported, re.I):
+        raise VectorError("回读含声明/资源")
+    # Supply ONLY the namespaces used by official detached savePath. Any
+    # explicit namespace override is still checked by _tag/attribute allowlist.
+    wrapper = ET.fromstring('<svg xmlns="' + NS + '" xmlns:sodipodi="' + SODIPODI + '">' + exported + '</svg>')
+    if (wrapper.text or "").strip() or len(wrapper) != 1:
+        raise VectorError("每个 Shape 必须回读恰一个根且无额外文字")
+    root = wrapper[0]
+    if (root.tail or "").strip():
+        raise VectorError("回读根后有额外 tail")
+    if _tag(root) == "svg":
+        # Compatibility for explicit input-coordinate wrappers, not the
+        # VectorLayer full-document serializer (which this API never calls).
+        validate_svg(ET.tostring(root, encoding="unicode"), canvas, dpi)
+        return [_semantic(el, 72 / dpi[0]) for el in root]
+    return [_semantic(root, 1.0)]  # detached Shape geometry is points
+
+
+def _same_semantics(actual, expected):
+    if len(actual) != len(expected):
+        return False
+    # Preserve drawing/Z order as well as multiplicity and complete content.
+    return all(a[0] == e[0] and a[2] == e[2] and len(a[1]) == len(e[1]) and
+               all(math.isclose(x, y, rel_tol=1e-6, abs_tol=1e-5) for x, y in zip(a[1], e[1]))
+               for a, e in zip(actual, expected))
 
 
 def import_annotations(ops, *, svg, name, target_document, canvas, dpi,
@@ -209,7 +373,7 @@ def import_annotations(ops, *, svg, name, target_document, canvas, dpi,
         shapes = layer.shapes()
         if not shapes:
             raise VectorError("形状回读为空")
-        combined = ET.Element("{" + NS + "}svg")
+        combined = []
         total = 0
         for shape in shapes:
             # stripTextMode=False: never strip native text for our check.
@@ -219,15 +383,12 @@ def import_annotations(ops, *, svg, name, target_document, canvas, dpi,
             total += len(exported.encode("utf-8"))
             if total > MAX_SVG_BYTES or re.search(r"<!|<\?", exported):
                 raise VectorError("形状回读超预算或含声明")
-            fragment = ET.fromstring(exported)
-            if _tag(fragment) == "svg":
-                if fragment.attrib != expected.attrib:
-                    raise VectorError("回读 SVG 根的物理尺寸/viewBox 不能证明映射保留")
-                combined.extend(list(fragment))
-            else:
-                combined.append(fragment)
-        if _signature(combined) != _signature(expected):
-            raise VectorError("元素/文本/几何回读不能证明完整保留（可能格式重写）；禁止当完整成功")
+            combined.extend(_readback(exported, canvas, dpi))
+            if len(combined) >= MAX_ELEMENTS:
+                raise VectorError("回读元素总数超预算")
+        expected_semantics = [_semantic(el, 72 / dpi[0]) for el in expected]
+        if not _same_semantics(combined, expected_semantics):
+            raise VectorError("完整文字/几何/绘制语义或顺序不能证明保留；禁止当完整成功")
         phase = "refresh"
         stable()
         doc.refreshProjection()
