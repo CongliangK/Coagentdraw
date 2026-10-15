@@ -272,10 +272,12 @@ def _verify_attached(doc, parent, node, above):
     return actual
 
 
-def _create_attached(doc, name, node_type, parent, above):
+def _create_attached(doc, name, node_type, parent, above, before_attach=None):
     node = doc.createNode(str(name), node_type)
     if node is None or node.type() != node_type.lower():
         raise OpError("createNode 失败或节点类型不符: {0}".format(node_type))
+    if before_attach is not None:
+        before_attach()
     if not parent.addChildNode(node, above):
         raise OpError("addChildNode 失败: {0}".format(_node_id(node)))
     return _verify_attached(doc, parent, node, above)
@@ -293,44 +295,64 @@ def layer_group(name, parent_id=None, above_layer_id=None):
 
 
 def layer_add(png_path, name, above_layer_id=None, offset_x=0, offset_y=0,
-              parent_id=None):
-    """PNG → 新 paint layer(非破坏式,不动既有图层)。返回新图层 id。"""
+              parent_id=None, mode=None, fit_canvas=None):
+    """PNG → 新透明 paint layer；坐标映射见 placement，不动既有图层。"""
+    from .placement import (PlacementError, PreprocessBudget, prepare_png,
+                            resource_estimate, resize_rgba, resolve_mode, source_layout)
+    budget = PreprocessBudget()
     doc = _active_doc()
     _check_rgba8(doc)
+    for label, value in (("png_path", png_path), ("name", name),
+                         ("parent_id", parent_id), ("above", above_layer_id)):
+        if value is None and label in ("parent_id", "above"):
+            continue
+        if not isinstance(value, str):
+            raise OpError("{0} 必须是字符串".format(label))
+        if label in ("png_path", "name") and not value.strip():
+            raise OpError("{0} 必须是非空字符串".format(label))
     try:
-        off_x, off_y = int(offset_x), int(offset_y)
-    except (TypeError, ValueError):
-        raise OpError("offset_x/offset_y 必须是整数")
-    png_path = os.path.abspath(os.path.expanduser(png_path))
-    img = QImage(png_path)
-    if img.isNull():
-        raise OpError("PNG 读取失败: {0}".format(png_path))
-    img = img.convertToFormat(QImage.Format.Format_RGBA8888)
-    w, h = img.width(), img.height()
-    if off_x < 0 or off_y < 0 or off_x + w > doc.width() or off_y + h > doc.height():
-        raise OpError(  # Krita 会静默裁剪,必须先拒绝
-            "图层越界: {0}x{1}@({2},{3}) 超出画布 {4}x{5}".format(
-                w, h, off_x, off_y, doc.width(), doc.height())
-        )
-
-    bpl = img.bytesPerLine()
-    raw = img.constBits()
-    try:
-        raw = raw.asarray(bpl * h)  # PyQt6: voidptr 需显式取尺寸
-    except AttributeError:
-        pass  # PyQt5: 可直接切片
-    buf = bytearray(w * h * 4)
-    for r in range(h):  # 逐行拷贝,规避行尾对齐填充
-        buf[r * w * 4:(r + 1) * w * 4] = raw[r * bpl:r * bpl + w * 4]
-
-    parent, above_node = _insertion_target(doc, parent_id, above_layer_id)
-    layer = _create_attached(doc, name, "paintLayer", parent, above_node)
-    if not layer.setPixelData(bytes(buf), off_x, off_y, w, h):
-        raise OpError("setPixelData 失败;新图层可能已挂树: {0}".format(_node_id(layer)))
+        resolve_mode(mode, fit_canvas, offset_x, offset_y)
+        parent, above_node = _insertion_target(doc, parent_id, above_layer_id)
+        png_path = os.path.abspath(os.path.expanduser(png_path))
+        encoded, mapping = prepare_png(png_path, doc.width(), doc.height(),
+                                       mode, offset_x, offset_y, fit_canvas, budget=budget)
+        sw, sh = mapping["source_size"]
+        budget.check("Qt 解码前")
+        # Decode ONLY the checked, bounded snapshot; do not reopen a mutable path.
+        img = QImage.fromData(encoded, "PNG")
+        del encoded
+        budget.check("Qt 解码后")
+        if img.isNull() or (img.width(), img.height()) != (sw, sh):
+            raise OpError("PNG 解码失败或尺寸与预检不一致")
+        budget.check("RGBA8888 转换前")
+        img = img.convertToFormat(QImage.Format.Format_RGBA8888)
+        budget.check("RGBA8888 转换后")
+        if img.isNull() or (img.width(), img.height()) != (sw, sh):
+            raise OpError("QImage RGBA8888 转换失败或尺寸改变")
+        bpl = img.bytesPerLine()
+        source_layout(sw, sh, bpl)  # before constBits/asarray, including stride bytes
+        mapping["resources"] = resource_estimate(sw, sh, *mapping["output_size"], bpl)
+        raw = img.constBits()
+        try:
+            raw = raw.asarray(bpl * sh)  # PyQt6: voidptr 需显式取尺寸; not a bytes copy
+        except AttributeError:
+            pass  # 保留既有可切片缓冲区路径
+        buf = resize_rgba(raw, mapping, bytes_per_line=bpl, budget=budget)
+        del raw, img
+        w, h = mapping["output_size"]
+        off_x, off_y = mapping["origin"]
+        budget.check("创建节点前")
+        layer = _create_attached(doc, name, "paintLayer", parent, above_node,
+                                 before_attach=lambda: budget.check("挂树前"))
+        budget.check("写像素前")
+        if not layer.setPixelData(buf, off_x, off_y, w, h):
+            raise OpError("setPixelData 失败;新图层可能已挂树: {0}".format(_node_id(layer)))
+    except PlacementError as exc:
+        raise OpError(str(exc)) from exc
     layer = _verify_attached(doc, parent, layer, above_node)
     doc.refreshProjection()
     return {"id": _node_id(layer), "name": layer.name(), "width": w, "height": h,
-            "parent_id": _node_id(parent)}
+            "parent_id": _node_id(parent), "placement": mapping}
 
 
 def _alpha_supported(node):

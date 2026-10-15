@@ -27,7 +27,7 @@ POST_ROUTES = {
     "/layer/png": (ops.layer_png, ("id", "path"), ()),
     "/layer/group": (ops.layer_group, ("name",), ("parent_id", "above")),
     "/layer/add": (ops.layer_add, ("png_path", "name"),
-                   ("above", "offset_x", "offset_y", "parent_id")),
+                   ("above", "offset_x", "offset_y", "parent_id", "mode", "fit_canvas")),
     "/layer/props": (ops.layer_props, ("id",), ("alpha_locked", "opacity", "blending_mode")),
     "/layer/visible": (ops.layer_set_visible, ("id", "visible"), ()),
     "/layer/rename": (ops.layer_rename, ("id", "name"), ()),

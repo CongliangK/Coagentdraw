@@ -56,11 +56,13 @@
 | `/doc/snapshot` | POST | 一次主线程回调配对捕获投影和选区，附会话 token 与像素摘要 |
 | `/layer/png` | POST | 图层像素导出 PNG |
 | `/layer/group` | POST | 新建图层组，可用 parent_id 嵌套、above 定位同级 |
-| `/layer/add` | POST | PNG → 新 paint 图层(非破坏式,可指定 parent_id/above/offset) |
+| `/layer/add` | POST | PNG → 新透明 paint 图层（keep_size / fit_canvas / insert_at_offset，保留 parent_id/above/offset） |
 | `/layer/visible` `/layer/rename` | POST | 可见性 / 重命名 |
 | `/layer/props` | POST | Alpha Lock / 0..1 不透明度 / 稳定 ID 混合模式（写后回读，非原子事务） |
 
 图层组与组内 PNG 导入的参数约束、CLI 示例及真实 Krita 验收步骤见 [CAD-11 图层组说明](docs/development/cad11_layer_groups.md)。
+
+`/layer/add` 的命名适配、严格整数坐标与确定性映射元数据见 [CAD-14 图像导入规则](<docs/development/cad14_placement.md>)。`fit_canvas` 只等比缩小、居中透明留白、不放大小图；`crop_at_bbox` 明确不支持。像素通道与实际落点本项尚未在真实 Qt/Krita 验证。
 
 图层属性契约、CLI 示例、部分写入语义与实机待验清单见 [CAD-12 图层属性说明](docs/development/cad12_layer_props.md)。`/layers` 增加 `alpha_locked`、`alpha_lock_supported`、`blending_mode`；混合模式画布效果尚未在本机验收。
 
@@ -83,6 +85,8 @@ python3 core/cwb.py save 作品.kra
 确定性八阶段图层组：`python3 core/cwb.py stage --help`。需显式已保存文档与独立身份 sidecar；同名不接管、只补未登记组，重开降级/部分失败及已有诊断 PNG 导入边界见 [CAD-21 阶段组织](docs/development/cad21_stage.md)（未实机验证保存/重开）。
 
 最小离线文件比较：`python3 core/cwb.py compare --help`。接受手工 before/after PNG，原尺度共同裁切、来源 SHA256 和非破坏性决定事件见 [CAD-23 比较说明](<docs/development/cad23_compare.md>)。仅 `create` 使用外部 CLI 可选 Pillow；所有决定仅记录，不实际隐藏/恢复 Krita 投影，不代表 #17 完成或 #25 联调。
+
+有限离线候选计划/现成剪影拼板：`python3 core/cwb.py candidates --help`。仅 `plan` 记录 `prepared_not_executed`；`board` 消费显式 SHA 登记的透明黑 PNG，contain 不拉伸，失败占位不消失（退出 2），仅输出入选清单/未执行新层 payload。可选 Pillow 仅在实际拼板时导入。字段、路径与资源上限见 [CAD-22 离线候选说明](<docs/development/cad22_candidates.md>)。教学 fixture 不证明真实八候选生成、两方向有效、mask 可靠或真实组内导入；这些验收仍未满足。
 
 有限离线风格配置：`python3 core/cwb.py style --help`。版本化 `style_tokens` **仅存独立 sidecar，不在项目主状态**；支持参考图摘要/锁定历史、显式提示片段导出和复用 #23 的同尺度人工标杆比较。契约与未完成门槛见 [CAD-26 风格工具](<docs/development/cad26_style.md>)；不自动改生成请求，不保证跨图一致性，未运行两个角色生成。
 
