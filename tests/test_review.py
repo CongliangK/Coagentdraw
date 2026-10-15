@@ -1,11 +1,14 @@
 """CAD-24 synthetic fixtures only: structure/safety, never artistic validity."""
 import copy
 import hashlib
+import io
 import json
 import os
 from pathlib import Path
+import struct
 import subprocess
 import sys
+import zlib
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -18,6 +21,56 @@ try:
     from PIL import Image
 except ImportError:
     Image = None
+
+
+def png_chunk(kind, payload=b""):
+    return (struct.pack(">I", len(payload)) + kind + payload
+            + struct.pack(">I", zlib.crc32(kind + payload) & 0xffffffff))
+
+
+def png_parts(depth=8, color=2, interlace=0, width=12, height=10):
+    # Independent standard-library encoder: no Pillow tolerance in negative fixtures.
+    header = png_chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, depth, color, 0, 0, interlace))
+    pixels = zlib.compress((b"\0" + b"\x7f" * (12 * 3)) * 10)
+    return b"\x89PNG\r\n\x1a\n", header, png_chunk(b"IDAT", pixels), png_chunk(b"IEND")
+
+
+def broken_pngs():
+    sig, header, pixels, end = png_parts()
+    normal = sig + header + pixels + end
+    split = 10
+    compressed = pixels[8:-4]
+    return {
+        "bad-iend-crc": normal[:-1] + bytes([normal[-1] ^ 255]),
+        "missing-iend-crc": normal[:-4],
+        "unknown-critical-chunk": sig + header + png_chunk(b"FAKE", b"x") + pixels + end,
+        "bad-signature": b"x" + normal[1:],
+        "ihdr-not-first": sig + png_chunk(b"tEXt", b"k\0v") + header + pixels + end,
+        "duplicate-ihdr": sig + header + header + pixels + end,
+        "short-ihdr": sig + png_chunk(b"IHDR", b"x") + pixels + end,
+        "chunk-length-overrun": sig + header + b"\x7f\xff\xff\xffIDAT" + end,
+        "chunk-length-high-bit": sig + header + b"\xff\xff\xff\xffIDAT" + end,
+        "invalid-chunk-type": sig + header + png_chunk(b"f1Ke") + pixels + end,
+        "reserved-chunk-bit": sig + header + png_chunk(b"fAke") + pixels + end,
+        "no-idat": sig + header + end,
+        "nonempty-iend": sig + header + pixels + png_chunk(b"IEND", b"x"),
+        "duplicate-iend": normal + end,
+        "trailing-data": normal + b"extra",
+        "noncontiguous-idat": (sig + header + png_chunk(b"IDAT", compressed[:split])
+                               + png_chunk(b"tEXt", b"k\0v")
+                               + png_chunk(b"IDAT", compressed[split:]) + end),
+        "plte-after-idat": sig + header + pixels + png_chunk(b"PLTE", b"\0\0\0") + end,
+        "duplicate-plte": sig + header + png_chunk(b"PLTE", b"\0\0\0") * 2 + pixels + end,
+        "bad-plte-length": sig + header + png_chunk(b"PLTE", b"x") + pixels + end,
+        "trns-after-idat": sig + header + pixels + png_chunk(b"tRNS", b"\0" * 6) + end,
+        "bad-trns-length": sig + header + png_chunk(b"tRNS", b"x") + pixels + end,
+        "single-frame-apng": (sig + header + png_chunk(b"acTL", struct.pack(">II", 1, 0))
+                              + png_chunk(b"fcTL", struct.pack(">IIIIIHHBB", 0, 12, 10, 0, 0, 1, 10, 0, 0))
+                              + pixels + end),
+        "orphan-fctl": sig + header + png_chunk(b"fcTL", b"") + pixels + end,
+        "orphan-fdat": sig + header + pixels + png_chunk(b"fdAT", b"") + end,
+        "broken-pixel-stream": sig + header + png_chunk(b"IDAT", b"not zlib") + end,
+    }
 
 
 class ReviewHelpTests(unittest.TestCase):
@@ -270,6 +323,131 @@ class ReviewTests(unittest.TestCase):
             image.save(self.images[1], format="PNG")
         with patch.object(review, "MAX_PIXELS", 10), self.assertRaises(ValueError):
             self.prepare()
+
+    def test_png_container_negatives_prepare_and_legacy_import(self):
+        for name, data in broken_pngs().items():
+            with self.subTest(name=name, phase="prepare"):
+                self.images[0].write_bytes(data)
+                self.prepared = self.root / (name + "-rejected")
+                with self.assertRaises(ValueError):
+                    self.prepare()
+                self.assertFalse(self.prepared.exists())
+            # Model an internally consistent legacy prepared bundle, not a hash
+            # mismatch. Only fixture creation bypasses PNG validation; import does not.
+            self.prepared = self.root / (name + "-legacy")
+            self.output = self.root / (name + "-imported")
+            with patch.object(review, "_png_dimensions", return_value=[12, 10]):
+                value = self.response()
+            with self.subTest(name=name, phase="import"):
+                self.rejected(value)
+
+    def test_png_truncated_boundaries_and_all_chunk_crcs(self):
+        sig, header, pixels, end = png_parts()
+        raw = sig + header + pixels + end
+        for cut in (0, 1, 7, 8, 11, 20, 32, 33, len(raw)-13, len(raw)-12,
+                    len(raw)-8, len(raw)-4, len(raw)-1):
+            with self.subTest(cut=cut), self.assertRaises(ValueError):
+                review._png_dimensions(raw[:cut])
+        chunks = [header, png_chunk(b"tEXt", b"k\0v"), pixels, end]
+        for index in range(len(chunks)):
+            bad = list(chunks)
+            bad[index] = bad[index][:-1] + bytes([bad[index][-1] ^ 255])
+            with self.subTest(crc=index), self.assertRaises(ValueError):
+                review._png_dimensions(sig + b"".join(bad))
+
+    def test_png_ihdr_palette_transparency_and_resource_boundaries(self):
+        sig, header, pixels, end = png_parts()
+        cases = [png_parts(width=0), png_parts(height=0), png_parts(width=16385),
+                 png_parts(width=4001, height=4000), png_parts(depth=16),
+                 png_parts(depth=4, color=2), png_parts(color=1), png_parts(interlace=2)]
+        for parts in cases:
+            with self.subTest(header=parts[1]), self.assertRaises(ValueError):
+                review._png_dimensions(b"".join(parts))
+        for field in (10, 11):  # compression/filter method inside IHDR payload
+            payload = bytearray(header[8:-4]); payload[field] = 1
+            with self.subTest(field=field), self.assertRaises(ValueError):
+                review._png_dimensions(sig + png_chunk(b"IHDR", payload) + pixels + end)
+        palette = png_chunk(b"PLTE", b"\0\0\0")
+        trns = png_chunk(b"tRNS", b"\0")
+        gray_header = png_parts(color=0)[1]
+        indexed_header = png_parts(depth=1, color=3)[1]
+        rgba_header = png_parts(color=6)[1]
+        for middle in (indexed_header + pixels,
+                       indexed_header + trns + palette + pixels,
+                       indexed_header + png_chunk(b"PLTE", b"\0" * 9) + pixels,
+                       indexed_header + palette + png_chunk(b"tRNS", b"\0\0") + pixels,
+                       gray_header + palette + pixels,
+                       rgba_header + png_chunk(b"tRNS", b"\0" * 6) + pixels,
+                       header + palette + png_chunk(b"gAMA", struct.pack(">I", 45455)) + pixels,
+                       header + png_chunk(b"tRNS", b"\0" * 6) + palette + pixels):
+            with self.subTest(middle=middle), self.assertRaises(ValueError):
+                review._png_dimensions(sig + middle + end)
+        with patch.object(review, "MAX_PNG", len(sig + header + pixels + end)-1):
+            with self.assertRaises(ValueError):
+                review._png_dimensions(sig + header + pixels + end)
+        with patch.object(review, "MAX_PNG_CHUNKS", 4, create=True):
+            self.assertEqual(review._png_dimensions(sig + header + png_chunk(b"teSt") + pixels + end), [12, 10])
+            with self.assertRaises(ValueError):
+                review._png_dimensions(sig + header + png_chunk(b"teSt") * 2 + pixels + end)
+
+    def test_legal_static_png_modes_metadata_and_interlace_keep_source_bytes(self):
+        samples = []
+        for mode in ("1", "L", "LA", "P", "RGB", "RGBA"):
+            with Image.new(mode, (12, 10)) as image:
+                options = {}
+                if mode == "LA":
+                    image.putpixel((1, 1), (127, 90))
+                elif mode == "RGBA":
+                    image.putpixel((1, 1), (30, 50, 70, 90))
+                if mode == "P":
+                    image.putpalette([0, 0, 0, 255, 0, 0] + [0] * 762)
+                    options.update(bits=1, transparency=b"\0\xff")
+                elif mode == "L":
+                    options["transparency"] = 0
+                elif mode == "RGB":
+                    options["transparency"] = (0, 0, 0)
+                buffer = io.BytesIO()
+                image.save(buffer, format="PNG", **options)
+                samples.append((mode, buffer.getvalue()))
+        for color in (0, 3):
+            for depth in (1, 2, 4, 8):
+                sig, header, _, end = png_parts(depth=depth, color=color)
+                scanlines = (b"\0" + b"\0" * ((12 * depth + 7) // 8)) * 10
+                palette = (png_chunk(b"PLTE", b"\0\0\0\xff\0\0")
+                           + png_chunk(b"tRNS", b"\0\x80")) if color == 3 else png_chunk(b"tRNS", b"\0\0")
+                samples.append((f"color{color}-depth{depth}", sig + header + palette
+                                + png_chunk(b"IDAT", zlib.compress(scanlines)) + end))
+        sig, header, pixels, end = png_parts()
+        compressed = pixels[8:-4]
+        samples.append(("consecutive-idat", sig + header + png_chunk(b"IDAT", compressed[:5])
+                        + png_chunk(b"IDAT") + png_chunk(b"IDAT", compressed[5:])
+                        + png_chunk(b"teSt", b"unknown ancillary retained") + end))
+        # Hand-encode valid Adam7 RGB, not Pillow's ignored PNG interlace option.
+        passes = ((0, 0, 8, 8), (4, 0, 8, 8), (0, 4, 4, 8), (2, 0, 4, 4),
+                  (0, 2, 2, 4), (1, 0, 2, 2), (0, 1, 1, 2))
+        scanlines = b""
+        for x, y, dx, dy in passes:
+            width = len(range(x, 12, dx))
+            scanlines += (b"\0" + b"\x7f" * (width * 3)) * len(range(y, 10, dy))
+        sig, header, _, end = png_parts(interlace=1)
+        samples.append(("adam7", sig + header + png_chunk(b"IDAT", zlib.compress(scanlines)) + end))
+        # Valid RGB ICC profile copied byte-for-byte; never stripped or transformed.
+        from PIL import ImageCms
+        profile = ImageCms.ImageCmsProfile(ImageCms.createProfile("sRGB")).tobytes()
+        sig, header, pixels, end = png_parts()
+        samples.append(("icc", sig + header + png_chunk(b"iCCP", b"sRGB\0\0" + zlib.compress(profile)) + pixels + end))
+        for name, raw in samples:
+            with self.subTest(name=name):
+                self.assertEqual(review._png_dimensions(raw), [12, 10])
+                for image in self.images:
+                    image.write_bytes(raw)
+                self.prepared = self.root / (name + "-prepared")
+                self.output = self.root / (name + "-imported")
+                value = self.response()
+                self.do_import(value)
+                for role, image in zip(review.ROLES, self.images):
+                    self.assertEqual(image.read_bytes(), raw)
+                    self.assertEqual((self.prepared / (role + ".png")).read_bytes(), raw)
 
     def test_sources_changed_content_or_replaced_even_same_bytes(self):
         value = self.response()

@@ -8,8 +8,10 @@ import json
 import os
 from pathlib import Path
 import re
+import struct
 import uuid
 import warnings
+import zlib
 
 from cwb_compare import (
     _digest, _directory, _json, _load_json, _parent, _read_at,
@@ -21,6 +23,7 @@ RESPONSE_SCHEMA = "cwb-review-feedback-v1"
 REPORT_SCHEMA = "cwb-review-report-v1"
 MAX_JSON = 1024 * 1024
 MAX_PNG = 32 * 1024 * 1024
+MAX_PNG_CHUNKS = 4096
 MAX_PIXELS = 16_000_000
 ROLES = ("original", "silhouette", "grayscale")
 COORDINATES = "original PNG native pixels; top-left origin; bbox_xywh; no scaling/rotation"
@@ -92,7 +95,81 @@ def _context(value):
     return value
 
 
+def _png_container(data):
+    """Bounded static-PNG framing checks, not a replacement pixel decoder.
+
+    Inspect only the already captured bytes; Pillow tolerates some missing/bad
+    IEND CRCs and unknown critical chunks. Do not normalize or reopen sources.
+    """
+    if len(data) > MAX_PNG or data[:8] != b"\x89PNG\r\n\x1a\n":
+        raise ValueError("无效/超限 PNG 签名或字节数")
+    offset, count, palette_entries = 8, 0, 0
+    seen, idat_closed = set(), False
+    before_palette = {b"cHRM", b"gAMA", b"iCCP", b"sBIT", b"sRGB"}
+    before_idat = before_palette | {b"bKGD", b"hIST", b"tRNS", b"pHYs"}
+    view = memoryview(data)
+    while offset < len(data):
+        count += 1
+        if count > MAX_PNG_CHUNKS or len(data) - offset < 12:
+            raise ValueError("PNG chunk 过多或边界/CRC 截断")
+        length = struct.unpack_from(">I", data, offset)[0]
+        kind = data[offset + 4:offset + 8]
+        end = offset + length + 12
+        if length > 0x7fffffff or end > len(data):
+            raise ValueError("PNG chunk 长度越界/截断")
+        if (any(not (65 <= c <= 90 or 97 <= c <= 122) for c in kind)
+                or kind[2] & 32):
+            raise ValueError("PNG chunk 类型/保留位无效")
+        crc = struct.unpack_from(">I", data, end - 4)[0]
+        if zlib.crc32(view[offset + 4:end - 4]) & 0xffffffff != crc:
+            raise ValueError("PNG chunk CRC 错误")
+        if count == 1 and kind != b"IHDR":
+            raise ValueError("PNG 必须以唯一 IHDR 开始")
+        if kind in (b"acTL", b"fcTL", b"fdAT"):
+            raise ValueError("仅接受静态 PNG；拒绝全部 APNG（包括单帧）")
+        if not kind[0] & 32 and kind not in (b"IHDR", b"PLTE", b"IDAT", b"IEND"):
+            raise ValueError("PNG 未知 critical chunk")
+        if kind in before_idat:
+            if kind in seen or b"IDAT" in seen or (kind in before_palette and b"PLTE" in seen):
+                raise ValueError("PNG 元数据 chunk 重复/顺序无效")
+            if kind == b"hIST" and not palette_entries:
+                raise ValueError("PNG hIST 必须在 PLTE 之后")
+            if kind == b"bKGD" and color == 3 and not palette_entries:
+                raise ValueError("索引 PNG bKGD 必须在 PLTE 之后")
+        if kind == b"IHDR":
+            if count != 1 or length != 13:
+                raise ValueError("PNG IHDR 必须唯一且长度为 13")
+            width, height, depth, color, compression, filtering, interlace = struct.unpack_from(">IIBBBBB", data, offset + 8)
+            depths = {0: (1, 2, 4, 8), 2: (8,), 3: (1, 2, 4, 8), 4: (8,), 6: (8,)}
+            if (not width or not height or max(width, height) > 16384 or width * height > MAX_PIXELS
+                    or depth not in depths.get(color, ()) or compression or filtering or interlace not in (0, 1)):
+                raise ValueError("PNG IHDR 无效/超限；仅接受 <=8 位静态 PNG")
+        elif kind == b"PLTE":
+            if (palette_entries or b"IDAT" in seen or seen & {b"tRNS", b"bKGD", b"hIST"}
+                    or color in (0, 4) or not 0 < length <= 768 or length % 3
+                    or (color == 3 and length // 3 > 2 ** depth)):
+                raise ValueError("PNG PLTE 长度/色型/顺序无效")
+            palette_entries = length // 3
+        elif kind == b"tRNS":
+            if not ((color == 0 and length == 2) or (color == 2 and length == 6)
+                    or (color == 3 and 0 < length <= palette_entries)):
+                raise ValueError("PNG tRNS 长度/色型/顺序无效")
+        elif kind == b"IDAT":
+            if idat_closed or (color == 3 and not palette_entries):
+                raise ValueError("PNG IDAT 必须连续；索引图必须先有 PLTE")
+        elif kind == b"IEND":
+            if length or b"IDAT" not in seen or end != len(data):
+                raise ValueError("PNG IEND 必须空数据、CRC 完整且唯一末尾；必须有 IDAT")
+            return [width, height]
+        if kind != b"IDAT" and b"IDAT" in seen:
+            idat_closed = True
+        seen.add(kind)
+        offset = end
+    raise ValueError("PNG 缺失完整 IEND")
+
+
 def _png_dimensions(data):
+    dimensions = _png_container(data)
     # CLI-only optional dependency. Never import for --help or read credentials.
     try:
         from PIL import Image
@@ -103,11 +180,9 @@ def _png_dimensions(data):
             warnings.simplefilter("error", Image.DecompressionBombWarning)
             with Image.open(io.BytesIO(data)) as image:
                 if (image.format != "PNG" or getattr(image, "n_frames", 1) != 1
-                        or image.width * image.height > MAX_PIXELS
-                        or max(image.size) > 16384 or data[24] > 8
+                        or list(image.size) != dimensions
                         or image.mode not in ("1", "L", "LA", "P", "RGB", "RGBA")):
-                    raise ValueError("只接受 <=16M 像素、边长<=16384 的单帧 8 位 PNG")
-                dimensions = list(image.size)
+                    raise ValueError("只接受 <=16M 像素、边长<=16384 的静态 <=8 位 PNG")
                 image.verify()
             with Image.open(io.BytesIO(data)) as image:
                 image.load()  # detect truncated pixel streams as well as bad chunks
