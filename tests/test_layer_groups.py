@@ -56,7 +56,7 @@ krita = types.ModuleType('krita')
 krita.Krita = Mock()
 with patch.dict(sys.modules, {'PyQt6': types.ModuleType('PyQt6'),
                               'PyQt6.QtGui': qtgui, 'krita': krita}):
-    ops = load_module('_cad11_ops', ROOT / 'core/krita_cowork/ops.py')
+    ops = load_module('_cad11_package.ops', ROOT / 'core/krita_cowork/ops.py')
 
 
 class Node:
@@ -135,6 +135,11 @@ class Doc:
 
 class Operations(unittest.TestCase):
     def setUp(self):
+        package = types.ModuleType('_cad11_package')
+        package.__path__ = [str(ROOT / 'core/krita_cowork')]
+        modules = patch.dict(sys.modules, {'_cad11_package': package})
+        modules.start()
+        self.addCleanup(modules.stop)
         self.doc = Doc()
         self.active = patch.object(ops, '_active_doc', return_value=self.doc)
         self.active.start()

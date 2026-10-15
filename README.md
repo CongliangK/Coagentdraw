@@ -56,10 +56,12 @@
 | `/doc/snapshot` | POST | 一次主线程回调配对捕获投影和选区，附会话 token 与像素摘要 |
 | `/layer/png` | POST | 图层像素导出 PNG |
 | `/layer/group` | POST | 新建图层组，可用 parent_id 嵌套、above 定位同级 |
-| `/layer/add` | POST | PNG → 新 paint 图层(非破坏式,可指定 parent_id/above/offset) |
+| `/layer/add` | POST | PNG → 新透明 paint 图层（keep_size / fit_canvas / insert_at_offset，保留 parent_id/above/offset） |
 | `/layer/visible` `/layer/rename` | POST | 可见性 / 重命名 |
 
 图层组与组内 PNG 导入的参数约束、CLI 示例及真实 Krita 验收步骤见 [CAD-11 图层组说明](docs/development/cad11_layer_groups.md)。
+
+`/layer/add` 的命名适配、严格整数坐标与确定性映射元数据见 [CAD-14 图像导入规则](<docs/development/cad14_placement.md>)。`fit_canvas` 只等比缩小、居中透明留白、不放大小图；`crop_at_bbox` 明确不支持。像素通道与实际落点本项尚未在真实 Qt/Krita 验证。
 
 `cwb.py export`、`selection-png`、`snapshot` 的参数、RGBA/U8+sRGB 限制、蒙版灰度/Alpha、无选区与覆盖失败边界见 [CAD-13 快照契约](<docs/development/cad13_snapshot.md>)。仅配对入口可声明同回调捕获；token 的实机关闭/重开门槛尚待验证，当前不能作为安全回填凭证。
 
