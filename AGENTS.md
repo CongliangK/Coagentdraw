@@ -9,7 +9,7 @@
 ## 目录与职责
 
 - [core/](<core/>)：内核程序。[krita_cowork](<core/krita_cowork/>) 为 Krita 进程内插件：[bridge_qt.py](<core/krita_cowork/bridge_qt.py>) 负责主线程桥接，[server.py](<core/krita_cowork/server.py>) 负责 HTTP 控制面，[ops.py](<core/krita_cowork/ops.py>) 负责文档与图层操作；[cwb.py](<core/cwb.py>) 为连接 Krita 与 ComfyUI 的命令行客户端；[install.sh](<core/install.sh>) 与[插件注册文件](<core/kritapykrita_krita_cowork.desktop>) 负责本机安装和启用配置。
-- [design/](<design/>)：设计工作流文档。[八阶段工作规范审核初稿](<design/角色设计八阶段工作规范_审核初稿.md>)（不代表已经获得用户最终批准）、[意图卡模板](<design/阶段一_角色意图卡_模板.md>) 与[调研报告](<design/调研报告/README.md>)。
+- [design/](<design/>)：设计工作流文档。[八阶段工作规范审核初稿](<design/角色设计八阶段工作规范_审核初稿.md>)（不代表已经获得用户最终批准）、[八阶段执行手册](<design/执行手册/README.md>)（包含[阶段一角色意图卡](<design/执行手册/01_立项定位.md>)及阶段二至八工作表）与[调研报告](<design/调研报告/README.md>)。
 - [comfyui/](<comfyui/>)：ComfyUI 工作流（API 格式 JSON）与依赖说明。
 - `_本地暂存/`：不入库的本地资料——绘画源文件（`.kra`）、角色设计调研原始素材、子智能体调研全部实测记录与图片。已被 `.gitignore` 排除，不是可随意清理的目录。
 
