@@ -23,7 +23,7 @@
 | 目录 | 内容 |
 |---|---|
 | [core/](core/) | 内核：Krita 插件 `krita_cowork`、命令行客户端 `cwb.py`、安装脚本 |
-| [design/](design/) | 设计工作流文档：八阶段工作规范、意图卡模板、[调研报告](design/调研报告/README.md)、[八阶段工作表](design/执行手册/README.md)（填写提示与设计记录整合在同一张表中） |
+| [design/](design/) | 设计工作流文档：八阶段工作规范、[调研报告](design/调研报告/README.md)、[八阶段执行手册](design/执行手册/README.md)（阶段一角色意图卡与阶段二至八工作表统一收录，填写提示与设计记录整合在同一张表中） |
 | [comfyui/](comfyui/) | ComfyUI 工作流（Qwen-Image-2.1，API 格式）与依赖模型说明 |
 
 ## 许可证
