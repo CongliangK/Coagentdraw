@@ -1,6 +1,8 @@
 # CAD-21：八阶段图层组与幂等 setup
 
-这是确定性的本地 CLI 功能，无新 UI、无模型/云端调用；只消费 [CAD-11 图层组 API](<cad11_layer_groups.md>)。预设与实现位于 [cwb_stage.py](<../../core/cwb_stage.py>)，入口在 [cwb.py](<../../core/cwb.py>)。不修改 [项目状态实现](<../../core/cwb_project.py>) 或其 schema，不自动更新阶段完成状态；不把设计审核初稿视为正式规范。
+> **PR-01 目标流程/待迁移提示**：PR-02 目标：按 schema/workflow 分派旧新预设，旧 sidecar 继续旧规则；新流程按四类实际文档按需建组，不把八阶段组硬塞同一文档。身份以已登记标记/绑定确认，不接管同名层；保存重开重新定位仍须 B 实测。下文表格与 setup 编号仍是旧流程，不按新06解释。 见[现行总纲](<../../design/Krita中枢创作流程_正式执行规范.md>)。此提示不增加现有命令、参数或运行保证。
+
+这是确定性的本地 CLI 功能，无新 UI、无模型/云端调用；只消费 [CAD-11 图层组 API](<cad11_layer_groups.md>)。预设与实现位于 [cwb_stage.py](<../../core/cwb_stage.py>)，入口在 [cwb.py](<../../core/cwb.py>)。不修改 [项目状态实现](<../../core/cwb_project.py>) 或其 schema，不自动更新阶段完成状态；旧实现说明不代表已经采用新流程预设。
 
 ## 最小预设
 
