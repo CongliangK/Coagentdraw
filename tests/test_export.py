@@ -58,7 +58,8 @@ class ExportTests(unittest.TestCase):
         self.assertEqual(len(report["assets"]), 1)
         self.assertIn("kra", report["missing"])
         self.assertIn("final_png", report["missing"])  # no extension-based role invention
-        self.assertIn("intent_card", report["missing"])
+        self.assertIn("ideas", report["missing"])  # schema2 has no mandatory single intent card
+        self.assertNotIn("intent_card", report["missing"])
         self.assertEqual((self.out / "project_state.json").read_bytes(), before[self.root / project.STATE])
         self.assertEqual({p: p.read_bytes() for p in before}, before)
         self.assertEqual(len(list((self.out / "assets").rglob("*.png"))), 1)
@@ -72,6 +73,7 @@ class ExportTests(unittest.TestCase):
         kra = self.asset("stages/04-探索/源.kra", b"not a real KRA")
         wf = self.asset("stages/04-探索/workflow.json", b'{"nodes": []}')
         project.update(self.root, lambda r, d: d.update(intent_card="意图", design_pillars=["剪影"]))
+        project.update(self.root, lambda r, d: project.add_idea(r, d, "test-seed", "fixture", "意图"))
         sidecar = {"description": "设计说明", "references": ["作者 / https://example.test / 授权未知"],
                    "versions": ["v1：手工探索"]}
         (self.root / "export.json").write_text(json.dumps(sidecar), encoding="utf-8")
@@ -333,6 +335,8 @@ class ExportTests(unittest.TestCase):
         data = project.read_state(self.root)[0]
         duplicate = copy.deepcopy(data["assets"][0])
         duplicate["id"] = str(uuid.uuid4())
+        duplicate["object_id"] = str(uuid.uuid4())
+        duplicate["version"] = str(uuid.uuid4())
         for path in (self.a["path"], self.a["path"] + "/child", "stages/04-探索"):
             duplicate["path"] = path
             data["assets"] = [data["assets"][0], duplicate]

@@ -1,8 +1,31 @@
 # CAD-21：八阶段图层组与幂等 setup
 
-这是确定性的本地 CLI 功能，无新 UI、无模型/云端调用；只消费 [CAD-11 图层组 API](<cad11_layer_groups.md>)。预设与实现位于 [cwb_stage.py](<../../core/cwb_stage.py>)，入口在 [cwb.py](<../../core/cwb.py>)。不修改 [项目状态实现](<../../core/cwb_project.py>) 或其 schema，不自动更新阶段完成状态；不把设计审核初稿视为正式规范。
+> **PR-02 工程状态**：按 workflow/文档角色选择新预设，sidecar v1继续旧键校验、v2携带 workflow与document_role。新旧不能混用或自动升级；新06是三视图而旧06仍是收敛。身份保护和pending部分失败记录沿用；保存重开只有mock证据，B/C均未验。见[现行总纲](<../../design/Krita中枢创作流程_正式执行规范.md>)。组层组织不是绘图或阶段完成。
 
-## 最小预设
+这是确定性的本地 CLI 功能，无新 UI、无模型/云端调用；只消费 [CAD-11 图层组 API](<cad11_layer_groups.md>)。预设与实现位于 [cwb_stage.py](<../../core/cwb_stage.py>)，入口在 [cwb.py](<../../core/cwb.py>)。不写[项目状态](<../../core/cwb_project.py>)，不自动更新阶段完成、批准或selected_concept_id；项目schema和独立sidecar版本不是同一文件。
+
+## 新 workflow：按工作文档角色（sidecar v2）
+
+```bash
+python3 core/cwb.py stage setup 4 --workflow krita-character-illustration-v1 --role character \
+  --document /已授权/专用测试.kra --state /已授权/专用测试.cwb-stage.json
+# 同一文档阶段05：沿用已有sidecar的workflow/role，不重复建相同组。
+python3 core/cwb.py stage setup 5 \
+  --document /已授权/专用测试.kra --state /已授权/专用测试.cwb-stage.json
+```
+
+首次新建新流程sidecar需显式 `--workflow` 和 `--role`；不提供时保留旧CLI默认旧预设。已有sidecar省略则沿用绑定，显式不匹配时在服务写入前拒绝，绝不把旧记录重新贴成新编号含义。角色按阶段兼容检查；只建立该类工作文档所需组，不要求一文档八个阶段，也不创建KRA或内容图层。
+
+| role / 阶段 | 顶层组（含子组） |
+|---|---|
+| ideation / 01—03 | 阅读说明与当前问题、素材簇、待比较创意、本轮选中、暂存与未选 |
+| character / 04—05 | 简要意图与保持要点、参考、探索（剪影/服装结构/粗线稿/配色）、主稿（线稿/基础色/局部说明）、修改候选、诊断与比较 |
+| turnaround / 06 | 说明与基准线、正面/侧面/背面（各线稿/基础色）、局部结构与色板、旧版本与待确认候选 |
+| illustration / 07—08 | 角色参考与画面意图、构图候选、确认稿、制作（结构与底画/光影/关键区域/材质细节/全图调整）、AI修改候选、诊断与比较 |
+
+侧面组默认“待确认角色自身左右”，不替作者决定。没有实际图像/作者确认，组存在不等于设定或插画完成。角色组使用持久语义键如 `character/30_主稿/线稿`；显示名仍带独立随机标记，重开、冲突和部分失败规则与下文一致。新流程的 `import-diagnostic` 明确拒绝，避免把旧06诊断写入三视图；该兼容子命令仍只服务旧06，不扩展插件或候选导入能力。
+
+## 旧流程最小预设（sidecar v1，保持历史语义）
 
 每阶段在根下新增一个阶段外组，以下子组位于其中。**只创建尚未登记的组**，从不覆盖/删除/移动/改名/隐藏/重排已有节点，也不创建内容图层。
 
@@ -38,7 +61,7 @@ python3 core/cwb.py stage status --state /绝对路径/测试.cwb-stage.json
 
 ## 身份与重开降级
 
-独立 sidecar v1 记录 `sidecar_id`、文档绝对路径、观察到的 `session`（现有 `/ping` 的 pid 与 `/layers` 根 ID）、每个预设语义键的随机 `token`、创建名称、最近节点 ID、`pending/verified` 状态，以及追加的操作事件。
+独立 sidecar v1/v2 记录 `sidecar_id`、文档绝对路径、观察到的 `session`（现有 `/ping` 的 pid 与 `/layers` 根 ID）、每个预设语义键的随机 `token`、创建名称、最近节点 ID、`pending/verified` 状态，以及追加的操作事件。
 
 1. 每次执行先重新查询 `/docs`、`/ping`、`/layers`，核对唯一活动路径与树信息，**全量**验证 sidecar 内已登记的组，再计划缺失组。未登记同名节点（包括 paint layer）存在时停止，不自动接管或生成一套同名组；sidecar 丢失但树中还有本功能标记时也停止。
 2. 观察到的 pid/root 不变且已登记 ID 仍存在时，用该 ID 保留改名/移组/重排。不把父级、顺序、显示名称作为身份。标记重复，或 ID 与标记指向不同节点，即使原 ID 尚有效也停止。
@@ -79,4 +102,4 @@ python3 core/cwb.py stage import-diagnostic /绝对路径/已有诊断.png \
 - 用户手工连续 setup、改名、重排、移组，在真实专用 `.kra` 保存、关闭、重开后的 UUID/标记解析；
 - #18 真实 PNG 导入后的可见像素、保存与重开保留，以及诊断内容本身。
 
-用户授权后须用专用测试文件逐项记录前后 `/layers`、sidecar、版本/插件来源及保存重开结果；证据只存于 `/tmp/coagentdraw-orchestrate-20261015/`。没有强文档身份时保留上述并发和重开降级边界，不编造实机保证。
+用户授权后须用专用测试文件逐项记录前后 `/layers`、sidecar、版本/插件来源及保存重开结果；本PR离线证据存于检出外 `/home/liangruochong/.dsh/coagentdraw-evidence/pr02-*`；后续实机证据另行授权记录，不使用本PR合成fixture冒充。没有强文档身份时保留上述并发和重开降级边界，不编造实机保证。

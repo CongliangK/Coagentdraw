@@ -34,6 +34,7 @@ class ProjectTests(unittest.TestCase):
 
     def asset(self, path="stages/01-意图/作品.kra", content=b"original editable art"):
         target = self.root / path
+        target.parent.mkdir(parents=True, exist_ok=True)  # fixture only; schema2 init creates no empty stages
         target.write_bytes(content)
         return path
 
@@ -53,7 +54,8 @@ class ProjectTests(unittest.TestCase):
         self.assertEqual(state["assets"][0]["category"], "final")
         self.assertEqual(status["asset_checks"][0]["status"], "ok")
         self.assertEqual((self.root / path).read_bytes(), b"original editable art")
-        self.assertTrue(all((self.root / project.stage_dir(i)).is_dir() for i in range(1, 9)))
+        self.assertFalse(any((self.root / project.stage_dir(i)).exists() for i in range(2, 9)))
+        self.assertEqual(state["schema_version"], 2)
 
     def test_repeated_initialization_and_calls_are_noops(self):
         path = self.asset()
@@ -68,7 +70,12 @@ class ProjectTests(unittest.TestCase):
         self.assertEqual(before, (self.root / project.STATE).read_bytes())
 
     def test_explicit_completion_does_not_invent_acceptance(self):
-        self.cli("stage", self.root, 1, "--status", "completed")
+        self.cli("stage", self.root, 1, "--status", "completed", ok=False)
+        self.assertEqual(self.state()["stages"][0]["status"], "in_progress")
+        self.cli("idea", self.root, "seed", "fixture", "--text", "纯测试起点")
+        data = self.cli("decision", self.root, "stage", "text_seeds", "approve", "--scope", "fixture", "--source", "人工转录测试指令", "--outcome", "idea:seed")
+        approval = data["decisions"][-1]["id"]
+        self.cli("stage", self.root, 1, "--status", "completed", "--approval", approval)
         self.cli("stage", self.root, 3)
         state = self.state()
         self.assertEqual(state["stages"][0]["status"], "completed")
@@ -178,7 +185,9 @@ class ProjectTests(unittest.TestCase):
         with mock.patch.object(project.os, "link", side_effect=KeyboardInterrupt):
             with self.assertRaises(KeyboardInterrupt):
                 project.initialize(root, "new")
+        self.assertFalse((root / "stages").exists())
         asset = root / project.stage_dir(1) / "existing.kra"
+        asset.parent.mkdir(parents=True)
         asset.write_bytes(b"untouched")
         project.initialize(root, "new")
         self.assertEqual(asset.read_bytes(), b"untouched")

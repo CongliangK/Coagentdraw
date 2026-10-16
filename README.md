@@ -1,5 +1,19 @@
 # Coagentdraw — Krita × ComfyUI × 智能体 复合工作台
 
+## 现行创作路线与能力边界（PR-02）
+
+**Krita 是视觉中枢**：大量文本起点 ↔ 联想调研 → 跨创意选择 → 角色视觉探索 → 角色方案收敛（选择、实际修改、复看）→ 正侧背三视图设定核对 → 独立插画方案探索确认 → 插画制作交付。三视图是默认完整路线必需成果；角色确认不等于插画确认。
+
+日常入口：[正式执行规范](<design/Krita中枢创作流程_正式执行规范.md>)、[八阶段手册](<design/执行手册/README.md>)、[改造跟踪](<design/Krita中枢改造跟踪.md>)。四类本地可编辑 Krita 文档按需建立：想象/提案板（02—03承接01）、角色设计稿（04—05）、三视图设定（06）、插画稿（07—08）；PNG 只是派生预览，原稿与候选保留。KRA 与第三方原始资料不入公开仓库。
+
+| 能力层次 | 本次状态 |
+|---|---|
+| 已有实现（A离线） | 新项目schema 2 + workflow；多起点拆合来源、多文档、版本化资产/人类来源决定与批准失效；只读迁移计划和授权备份升级；新旧文档角色组/sidecar分派。旧schema1按旧语义只读与原有导出兼容；下文其他能力仍受各自说明限制 |
+| 待联调/后续工程 | 新旧绑定的真实Krita保存重开未验；真实想象板/创意入画布、候选比较、安全改图、三视图与插画制作链路按PR-03—06继续，不能以本次索引/空组宣称已画完或批准 |
+| 待艺术验收 | 真实创作的选择、修订、三视图一致性及插画表达须作者确认，本次无作品验收 |
+
+PR-02只交付版本化索引与按文档角色组织组层的工程能力；不安装插件，不进行实机/作品验收，不表示软件已支持全部新流程。初始化不生成八份空表或空KRA。
+
 > [!IMPORTANT]
 > **项目状态：早期实验，个人开发工作台。** 本仓库主要作为作者与 AI 助手协作开发的公开工作区，用 GitHub Issues 组织任务与记录。它目前**不是**面向最终用户的产品：接口与行为随时变动，不做兼容性承诺，不提供使用支持。欢迎围观和开 Issue 记录问题，但请自行评估风险。
 
@@ -23,7 +37,7 @@
 | 目录 | 内容 |
 |---|---|
 | [core/](core/) | 内核：Krita 插件 `krita_cowork`、命令行客户端 `cwb.py`、安装脚本 |
-| [design/](design/) | 设计工作流文档：八阶段工作规范、[调研报告](design/调研报告/README.md)、[八阶段执行手册](design/执行手册/README.md)（阶段一角色意图卡与阶段二至八工作表统一收录，填写提示与设计记录整合在同一张表中） |
+| [design/](design/) | 设计工作流文档：[现行正式执行规范](<design/Krita中枢创作流程_正式执行规范.md>)、[调研报告](design/调研报告/README.md)、[八阶段执行手册](design/执行手册/README.md)（新八阶段一体简表；旧路径保留迁移说明） |
 | [comfyui/](comfyui/) | ComfyUI 工作流（Qwen-Image-2.1，API 格式）与依赖模型说明 |
 
 ## 许可证
@@ -83,7 +97,7 @@ python3 core/cwb.py save 作品.kra
 
 离线项目状态与成果索引：`python3 core/cwb.py project --help`，目录、修订冲突和恢复说明见 [项目状态 CLI](design/项目状态_CLI.md)。
 
-确定性八阶段图层组：`python3 core/cwb.py stage --help`。需显式已保存文档与独立身份 sidecar；同名不接管、只补未登记组，重开降级/部分失败及已有诊断 PNG 导入边界见 [CAD-21 阶段组织](docs/development/cad21_stage.md)（未实机验证保存/重开）。
+版本化阶段组：`python3 core/cwb.py stage --help`，新流程首次用 `--workflow krita-character-illustration-v1 --role ideation|character|turnaround|illustration` 按兼容阶段的工作文档建所需组；省略workflow的新sidecar保持旧预设，旧文件不自动迁移。需显式已保存文档与独立身份sidecar；同名不接管、持久标记/部分失败和旧06诊断导入边界见[CAD-21阶段组织](<docs/development/cad21_stage.md>)（仅mock验证，真实保存重开未验）。
 
 最小离线文件比较：`python3 core/cwb.py compare --help`。接受手工 before/after PNG，原尺度共同裁切、来源 SHA256 和非破坏性决定事件见 [CAD-23 比较说明](<docs/development/cad23_compare.md>)。仅 `create` 使用外部 CLI 可选 Pillow；所有决定仅记录，不实际隐藏/恢复 Krita 投影，不代表 #17 完成或 #25 联调。
 

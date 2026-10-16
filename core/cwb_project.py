@@ -9,6 +9,9 @@ import stat
 import tempfile
 import uuid
 
+from cwb_workflow import (WORKFLOW, LEGACY_WORKFLOW, STAGES as WORKFLOW_STAGES,
+                          DOCUMENT_STAGES, REQUIRED_ROLES)
+
 
 STAGES = ("意图", "调研", "提案", "探索", "锁定", "收敛", "交付", "插画")
 STATE = "project_state.json"
@@ -75,6 +78,13 @@ def fingerprint(root, value):
 
 
 def validate(data):
+    if isinstance(data, dict) and type(data.get("schema_version")) is int and data["schema_version"] == 2:
+        return validate_v2(data)
+    return validate_v1(data)
+
+
+def validate_v1(data):
+    """Frozen schema-1 vocabulary, including its historical directories."""
     try:
         if not isinstance(data, dict) or type(data["schema_version"]) is not int or data["schema_version"] != 1:
             raise ValueError("不支持的 schema_version")
@@ -204,15 +214,7 @@ def initialize(root, name):
             if data["name"] != name:
                 raise ProjectError("项目已经存在且名称不同，未修改")
             return data  # 幂等初始化，不重置状态或作品。
-        for stage in range(1, 9):
-            path = asset_path(root, stage_dir(stage))
-            path.mkdir(parents=True, exist_ok=True)
-        timestamp = now()
-        data = {"schema_version": 1, "project_id": str(uuid.uuid4()), "name": name,
-                "revision": 0, "created_at": timestamp, "updated_at": timestamp,
-                "current_stage": 1, "intent_card": "", "design_pillars": [], "style_anchors": [],
-                "stages": [{"stage": i, "directory": stage_dir(i), "status": "in_progress" if i == 1 else "pending"} for i in range(1, 9)],
-                "stage_history": [{"from": None, "to": 1, "at": timestamp, "note": "初始化"}], "assets": []}
+        data = new_state(name)
         atomic_write(root, data, None)
         return data
 
@@ -221,9 +223,12 @@ def update(root, operation, expected=None):
     root = Path(root).resolve(strict=True)
     with locked(root):
         data, raw = read_state(root)
+        if data["schema_version"] == 1:
+            raise ProjectError("旧流程 schema 1 只读；请先 migration-plan 并显式授权 upgrade")
         if expected is not None and data["revision"] != expected:
             raise ProjectError("修订冲突：预期 {}，当前 {}；未写入".format(expected, data["revision"]))
         before = json.dumps(data, sort_keys=True)
+        refresh_reviews(root, data)
         operation(root, data)
         if json.dumps(data, sort_keys=True) != before:
             data["revision"] += 1
@@ -232,30 +237,81 @@ def update(root, operation, expected=None):
         return data
 
 
-def set_stage(data, stage, note, status="in_progress"):
-    if not integer(stage, 1, 8):
-        raise ProjectError("阶段必须是 1–8")
-    old = data["current_stage"]
-    old_status = data["stages"][stage - 1]["status"]
-    if status not in ("pending", "in_progress", "completed"):
-        raise ProjectError("无效阶段状态")
+def set_stage(data, stage, note, status="in_progress", approval=None):
+    require_v2(data)
+    if not integer(stage, 1, 8) or status not in ("pending", "in_progress", "awaiting_review", "completed"):
+        raise ProjectError("无效阶段或状态")
+    target = data["stages"][stage - 1]
+    if status == "completed":
+        decision = lookup(data["decisions"], approval)
+        if (decision["target_kind"] != "stage" or decision["target_id"] != target["stage_id"] or
+                decision["action"] != "approve" or decision["validity"] != "valid"):
+            raise ProjectError("completed 需要本阶段有效的人类批准与必要成果")
+        check_outcomes(data, stage, decision["outcomes"])
+        if stage == 3 and not any(r["kind"] == "idea" and r["id"] == data["selected_concept_id"] for r in decision["outcomes"]):
+            raise ProjectError("当前主线已改变；需要本轮创意重新批准")
+        target.update(approval_id=approval, outcomes=decision["outcomes"], needs_review=False)
+    old, old_status = data["current_stage"], target["status"]
     if old != stage or old_status != status:
-        # 不推断旧阶段已验收完成；完成状态由用户显式填写。
-        data["current_stage"] = stage
-        data["stages"][stage - 1]["status"] = status
+        data["current_stage"], target["status"] = stage, status
         data["stage_history"].append({"from": old, "to": stage, "at": now(), "note": note,
+                                      "workflow_id": WORKFLOW,
                                       "previous_target_status": old_status, "status": status})
 
 
-def record(root, data, path, stage, category, note):
+def record(root, data, path, stage, category, note, *, object_id=None, version=None,
+           role="unspecified", document_id=None, kind="working", group_marker=None,
+           region=None, preview=None):
+    require_v2(data)
     digest, size = fingerprint(root, path)
     stage = stage or data["current_stage"]
+    if not integer(stage, 1, 8) or category not in ("temporary", "final"):
+        raise ProjectError("无效成果阶段或类别")
+    if document_id is not None:
+        doc = lookup(data["documents"], document_id)
+        if stage not in DOCUMENT_STAGES[doc["role"]]:
+            raise ProjectError("成果阶段与文档角色不兼容")
+    preview_record = None
+    if preview is not None:
+        preview_digest, preview_size = fingerprint(root, preview)
+        preview_record = {"path": preview, "sha256": preview_digest, "size": preview_size}
+    # Idempotent legacy-style registration still appends changed bytes, never updates hashes.
+    fields = dict(path=path, sha256=digest, size=size, stage=stage, category=category,
+                  note=note, role=role, document_id=document_id, kind=kind,
+                  group_marker=group_marker, region=region, preview=preview_record)
     for asset in data["assets"]:
-        if (asset["path"], asset["sha256"], asset["stage"], asset["category"], asset["note"]) == (path, digest, stage, category, note):
-            return
-    data["assets"].append({"id": str(uuid.uuid4()), "path": path, "sha256": digest,
-                           "size": size, "stage": stage, "category": category,
-                           "recorded_at": now(), "note": note})
+        if all(asset.get(k) == v for k, v in fields.items()) and (object_id is None or asset["object_id"] == object_id) and (version is None or asset["version"] == version):
+            return asset
+    object_id, version = object_id or str(uuid.uuid4()), version or str(uuid.uuid4())
+    identifier(object_id)
+    identifier(version)
+    if kind not in ("working", "checkpoint"):
+        raise ProjectError("kind 必须为 working/checkpoint")
+    if kind == "checkpoint":
+        if not path.startswith("checkpoints/" + object_id + "/" + version + "/"):
+            raise ProjectError("确认快照必须位于 checkpoints/<object-id>/<version>/")
+        if preview is not None and not preview.startswith("checkpoints/" + object_id + "/" + version + "/"):
+            raise ProjectError("确认预览必须位于同一不覆盖快照目录")
+    for asset in data["assets"]:
+        if (asset["object_id"], asset["version"]) == (object_id, version):
+            raise ProjectError("对象版本已登记；不得替换旧版本")
+        if (asset.get("kind") == "checkpoint" or kind == "checkpoint") and path == asset["path"]:
+            raise ProjectError("确认快照路径已使用；不得覆盖或复用")
+    asset = {"id": str(uuid.uuid4()), "object_id": object_id, "version": version,
+             "stage_id": WORKFLOW_STAGES[stage - 1][0], "workflow_id": WORKFLOW,
+             "recorded_at": now(), **fields}
+    for old in data["assets"]:
+        if old["object_id"] == object_id and asset_content(old) != asset_content(asset):
+            invalidate(data, old["id"], old["stage"])
+    data["assets"].append(asset)
+    return asset
+
+
+def asset_content(asset):
+    preview = asset.get("preview")
+    return (asset["sha256"], asset["size"],
+            (preview["sha256"], preview["size"]) if preview else None,
+            asset.get("document_id"), asset.get("role"), asset.get("region"), asset.get("group_marker"))
 
 
 def inspect(root):
@@ -272,7 +328,430 @@ def inspect(root):
         except (OSError, ProjectError) as exc:
             check.update(status="invalid", error=str(exc))
         checks.append(check)
-    return {"state": data, "asset_checks": checks}
+    references = []
+    if data["schema_version"] == 2:
+        refresh_reviews(root, data)  # effective read-only view; no lock/file writes
+        for doc in data["documents"]:
+            try:
+                fingerprint(root, doc["path"])
+                status = "working_file_present_not_approval"
+            except (OSError, ProjectError):
+                status = "unbound_needs_confirmation"
+            references.append({"document_id": doc["id"], "status": status})
+        for idea in data["ideas"]:
+            if idea["text_ref"]:
+                try:
+                    digest, _ = fingerprint(root, idea["text_ref"].split("#", 1)[0])
+                    status = "ok" if digest == idea["text_ref_sha256"] else "changed_needs_confirmation"
+                except (OSError, ProjectError):
+                    status = "unbound_needs_confirmation"
+                references.append({"idea_id": idea["id"], "status": status})
+    return {"state": data, "asset_checks": checks, "reference_checks": references,
+            "workflow": WORKFLOW if data["schema_version"] == 2 else LEGACY_WORKFLOW,
+            "read_only": True}
+
+
+def require_v2(data):
+    if data["schema_version"] != 2:
+        raise ProjectError("旧流程 schema 1 只读；请显式升级")
+
+
+def identifier(value):
+    if not isinstance(value, str) or not value or any(c not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-" for c in value):
+        raise ProjectError("ID/版本仅允许非空 ASCII 字母数字、下划线与连字符")
+    return value
+
+
+def lookup(entries, value):
+    matches = [e for e in entries if e["id"] == value]
+    if len(matches) != 1:
+        raise ProjectError("引用未绑定或多义: " + str(value))
+    return matches[0]
+
+
+def new_state(name):
+    timestamp = now()
+    return {"schema_version": 2, "workflow_id": WORKFLOW, "project_id": str(uuid.uuid4()),
+            "name": name, "revision": 0, "created_at": timestamp, "updated_at": timestamp,
+            "current_stage": 1, "intent_card": "", "design_pillars": [], "style_anchors": [],
+            "ideas": [], "selected_concept_id": None, "documents": [], "assets": [], "decisions": [],
+            "stages": [{"stage": i, "stage_id": item[0], "status": "in_progress" if i == 1 else "pending",
+                        "outcomes": [], "approval_id": None, "needs_review": False}
+                       for i, item in enumerate(WORKFLOW_STAGES, 1)],
+            "stage_history": [{"from": None, "to": 1, "at": timestamp, "note": "初始化",
+                               "workflow_id": WORKFLOW}]}
+
+
+def validate_v2(data):
+    """Validate relationships without treating disk existence as a schema invariant."""
+    try:
+        if data["workflow_id"] != WORKFLOW:
+            raise ValueError("未知 workflow_id")
+        uuid.UUID(data["project_id"])
+        if not isinstance(data["name"], str) or not data["name"].strip():
+            raise ValueError("无效项目名")
+        if not integer(data["revision"]) or not integer(data["current_stage"], 1, 8):
+            raise ValueError("无效修订或阶段")
+        for key in ("created_at", "updated_at", "intent_card"):
+            if not isinstance(data[key], str):
+                raise ValueError("无效文本: " + key)
+        for key in ("design_pillars", "style_anchors"):
+            if not isinstance(data[key], list) or not all(isinstance(x, str) for x in data[key]):
+                raise ValueError("无效列表: " + key)
+        for key in ("ideas", "documents", "assets", "decisions", "stages", "stage_history"):
+            if not isinstance(data[key], list):
+                raise ValueError("无效列表: " + key)
+        for key in ("ideas", "documents", "assets", "decisions"):
+            seen = set()
+            for entry in data[key]:
+                identifier(entry["id"])
+                if entry["id"] in seen:
+                    raise ValueError("重复 ID: " + key)
+                seen.add(entry["id"])
+        for idea in data["ideas"]:
+            identifier(idea["version"])
+            if not isinstance(idea["title"], str) or not idea["title"].strip() or not isinstance(idea["text"], str):
+                raise ValueError("无效起点文本")
+            if idea["text_ref"] is not None:
+                relative_path(idea["text_ref"].split("#", 1)[0])
+                digest = idea["text_ref_sha256"]
+                if not isinstance(digest, str) or len(digest) != 64 or any(c not in "0123456789abcdef" for c in digest):
+                    raise ValueError("全文引用缺少登记摘要")
+            elif idea["text_ref_sha256"] is not None:
+                raise ValueError("纯文本起点不应伪造全文摘要")
+            if not idea["text"] and not idea["text_ref"]:
+                raise ValueError("起点需要短文本或全文位置")
+            if not isinstance(idea["source_idea_ids"], list) or not isinstance(idea["cluster_ids"], list):
+                raise ValueError("无效起点来源")
+            for source in idea["source_idea_ids"]:
+                lookup(data["ideas"], source)
+                if source == idea["id"]:
+                    raise ValueError("起点不能引用自身")
+            for cluster in idea["cluster_ids"]:
+                identifier(cluster)
+        # Iterative DAG check: no small-pool quota or recursion-depth limit.
+        idea_index = {i["id"]: i for i in data["ideas"]}
+        done, active = set(), set()
+        for idea_id in idea_index:
+            stack = [(idea_id, False)]
+            while stack:
+                node, leaving = stack.pop()
+                if leaving:
+                    active.discard(node)
+                    done.add(node)
+                elif node not in done:
+                    if node in active:
+                        raise ValueError("起点来源循环")
+                    active.add(node)
+                    stack.append((node, True))
+                    stack.extend((s, False) for s in idea_index[node]["source_idea_ids"] if s not in done)
+        if data["selected_concept_id"] is not None:
+            lookup(data["ideas"], data["selected_concept_id"])
+        for doc in data["documents"]:
+            relative_path(doc["path"])
+            if Path(doc["path"]).suffix.lower() != ".kra" or doc["role"] not in DOCUMENT_STAGES:
+                raise ValueError("无效 KRA 文档角色")
+            if doc["concept_id"] is not None:
+                lookup(data["ideas"], doc["concept_id"])
+            if doc["role"] != "ideation" and doc["concept_id"] is None:
+                raise ValueError("角色/插画文档需关联创意")
+            if doc["role"] == "illustration":
+                identifier(doc["illustration_id"])
+        versions, checkpoints = set(), set()
+        for asset in data["assets"]:
+            relative_path(asset["path"])
+            identifier(asset["object_id"])
+            identifier(asset["version"])
+            pair = asset["object_id"], asset["version"]
+            if pair in versions:
+                raise ValueError("重复对象版本")
+            versions.add(pair)
+            if not integer(asset["stage"], 1, 8) or asset["category"] not in ("temporary", "final"):
+                raise ValueError("无效资产类别/阶段")
+            digest = asset["sha256"]
+            if not isinstance(digest, str) or len(digest) != 64 or any(c not in "0123456789abcdef" for c in digest):
+                raise ValueError("无效摘要")
+            if not integer(asset["size"]) or not isinstance(asset["note"], str) or not isinstance(asset["recorded_at"], str):
+                raise ValueError("无效资产记录")
+            if asset["workflow_id"] == LEGACY_WORKFLOW:
+                if asset["kind"] != "legacy" or asset["legacy_origin"]["stage"] != asset["stage"]:
+                    raise ValueError("丢失旧资产来源")
+            elif asset["workflow_id"] != WORKFLOW or asset["stage_id"] != WORKFLOW_STAGES[asset["stage"] - 1][0]:
+                raise ValueError("资产阶段语义不匹配")
+            if not isinstance(asset["role"], str) or not asset["role"].strip():
+                raise ValueError("资产需明确角色")
+            if asset["document_id"] is not None:
+                doc = lookup(data["documents"], asset["document_id"])
+                if asset["stage"] not in DOCUMENT_STAGES[doc["role"]]:
+                    raise ValueError("资产/文档阶段不匹配")
+            if asset["kind"] not in ("working", "checkpoint", "legacy"):
+                raise ValueError("未知资产身份")
+            if asset["kind"] == "checkpoint":
+                prefix = "checkpoints/" + asset["object_id"] + "/" + asset["version"] + "/"
+                if not asset["path"].startswith(prefix) or asset["path"] in checkpoints:
+                    raise ValueError("确认快照位置冲突")
+                checkpoints.add(asset["path"])
+            region = asset["region"]
+            if region is not None and (set(region) != {"x", "y", "width", "height"} or
+                    any(not integer(region[k], 1 if k in ("width", "height") else 0) for k in region)):
+                raise ValueError("区域必须为画布非负坐标和正整数尺寸")
+            if asset["group_marker"] is not None:
+                if str(uuid.UUID(asset["group_marker"])) != asset["group_marker"]:
+                    raise ValueError("无效持久组标记")
+            if asset["preview"] is not None:
+                preview = asset["preview"]
+                relative_path(preview["path"])
+                if len(preview["sha256"]) != 64 or any(c not in "0123456789abcdef" for c in preview["sha256"]) or not integer(preview["size"]):
+                    raise ValueError("无效预览摘要")
+                if asset["kind"] == "checkpoint" and not preview["path"].startswith(prefix):
+                    raise ValueError("确认预览不在快照目录")
+        for decision in data["decisions"]:
+            if decision["target_kind"] not in ("idea", "asset", "stage") or decision["action"] not in ("approve", "select", "reject", "defer"):
+                raise ValueError("无效决定")
+            if decision["actor"] != "human" or not decision["source"].strip() or not decision["scope"].strip() or not isinstance(decision["reason"], str) or not isinstance(decision["at"], str):
+                raise ValueError("需要实际人类来源/范围/时间")
+            if decision["validity"] not in ("valid", "needs_review"):
+                raise ValueError("无效批准有效性")
+            if not isinstance(decision["outcomes"], list) or not decision["outcomes"]:
+                raise ValueError("决定需要版本化成果引用")
+            for outcome in decision["outcomes"]:
+                if outcome["kind"] not in ("asset", "idea"):
+                    raise ValueError("未知成果引用类型")
+                target = lookup(data["assets"] if outcome["kind"] == "asset" else data["ideas"], outcome["id"])
+                if target["version"] != outcome["version"] or (outcome["kind"] == "asset" and target["sha256"] != outcome["sha256"]):
+                    raise ValueError("批准版本不匹配")
+            if decision["target_kind"] == "stage":
+                if decision["action"] != "approve" or decision["target_version"] != WORKFLOW:
+                    raise ValueError("无效版本化阶段批准")
+                stage_number = [s[0] for s in WORKFLOW_STAGES].index(decision["target_id"]) + 1
+                check_outcomes(data, stage_number, decision["outcomes"])
+            else:
+                target = lookup(data["assets"] if decision["target_kind"] == "asset" else data["ideas"], decision["target_id"])
+                if decision["target_version"] != target["version"]:
+                    raise ValueError("决定版本不匹配")
+                if not any(r["kind"] == decision["target_kind"] and r["id"] == target["id"] for r in decision["outcomes"]):
+                    raise ValueError("决定未绑定目标成果")
+                if decision["action"] == "approve" and decision["target_kind"] == "asset" and target["kind"] != "checkpoint":
+                    raise ValueError("不能批准可变工作文件")
+                if decision["action"] == "select" and decision["target_kind"] != "idea":
+                    raise ValueError("select 仅支持创意")
+        if len(data["stages"]) != 8:
+            raise ValueError("需要八条阶段记录")
+        for number, stage in enumerate(data["stages"], 1):
+            if type(stage["stage"]) is not int or stage["stage"] != number or stage["stage_id"] != WORKFLOW_STAGES[number - 1][0] or stage["status"] not in ("pending", "in_progress", "awaiting_review", "completed") or type(stage["needs_review"]) is not bool or not isinstance(stage["outcomes"], list):
+                raise ValueError("无效版本化阶段")
+            if stage["status"] == "completed":
+                decision = lookup(data["decisions"], stage["approval_id"])
+                if decision["target_kind"] != "stage" or decision["target_id"] != stage["stage_id"] or decision["action"] != "approve" or decision["outcomes"] != stage["outcomes"]:
+                    raise ValueError("完成缺少对应批准/成果")
+                if decision["validity"] != "valid" and not stage["needs_review"]:
+                    raise ValueError("失效批准未标复核")
+        for history in data["stage_history"]:
+            if history["workflow_id"] not in (WORKFLOW, LEGACY_WORKFLOW) or not integer(history["to"], 1, 8) or (history["from"] is not None and not integer(history["from"], 1, 8)) or not isinstance(history["at"], str) or not isinstance(history["note"], str):
+                raise ValueError("阶段历史缺少流程来源")
+    except (KeyError, TypeError, ValueError, AttributeError, RecursionError) as exc:
+        raise ProjectError("项目状态结构损坏: " + str(exc)) from exc
+    return data
+
+
+def add_idea(root, data, idea_id, title, text="", text_ref=None, sources=(), clusters=()):
+    identifier(idea_id)
+    text_ref_sha256 = None
+    if text_ref:
+        text_ref_sha256, _ = fingerprint(root, text_ref.split("#", 1)[0])
+    for source in sources:
+        lookup(data["ideas"], source)
+    fields = dict(id=idea_id, title=title, text=text, text_ref=text_ref,
+                  text_ref_sha256=text_ref_sha256, source_idea_ids=list(sources), cluster_ids=list(clusters))
+    if any(i["id"] == idea_id for i in data["ideas"]):
+        old = lookup(data["ideas"], idea_id)
+        if all(old[k] == v for k, v in fields.items()):
+            return old
+        raise ProjectError("起点 ID 已存在；拆分/合并/替代请新建 ID 并保留来源")
+    idea = {**fields, "version": str(uuid.uuid4()), "created_at": now()}
+    data["ideas"].append(idea)
+    return idea
+
+
+def add_document(root, data, doc_id, path, role, concept=None, illustration=None):
+    identifier(doc_id)
+    fingerprint(root, path)  # working KRA hash deliberately not pinned to an approval
+    entry = dict(id=doc_id, path=path, role=role, concept_id=concept, illustration_id=illustration)
+    if any(d["id"] == doc_id for d in data["documents"]):
+        if lookup(data["documents"], doc_id) != entry:
+            raise ProjectError("文档身份已绑定；新版本/另存文件请使用新 document_id")
+    else:
+        data["documents"].append(entry)
+
+
+def outcome_ref(data, value):
+    kind, sep, item_id = value.partition(":")
+    if not sep or kind not in ("idea", "asset"):
+        raise ProjectError("成果引用格式为 idea:ID 或 asset:ID")
+    item = lookup(data["ideas"] if kind == "idea" else data["assets"], item_id)
+    return {"kind": kind, "id": item_id, "version": item["version"],
+            "sha256": item.get("sha256")}
+
+
+def check_outcomes(data, number, outcomes):
+    if not outcomes:
+        raise ProjectError("阶段批准必须引用必要成果")
+    assets = [lookup(data["assets"], o["id"]) for o in outcomes if o["kind"] == "asset"]
+    ideas = [o for o in outcomes if o["kind"] == "idea"]
+    if number == 1 and not ideas:
+        raise ProjectError("文本起点阶段需起点成果")
+    if number == 3 and not ideas:
+        raise ProjectError("创意选择需创意成果引用")
+    if not REQUIRED_ROLES.get(number, set()).issubset({a["role"] for a in assets}):
+        raise ProjectError("缺少阶段必要成果角色: " + str(sorted(REQUIRED_ROLES.get(number, set()))))
+    for asset in assets:
+        if asset["workflow_id"] != WORKFLOW or asset["stage"] != number or asset["kind"] != "checkpoint":
+            raise ProjectError("阶段批准只接受本流程本阶段的不变确认快照")
+        if asset["role"] not in ("delivery_manifest", "editable_source") and (asset["document_id"] is None or (asset["region"] is None and asset["group_marker"] is None)):
+            raise ProjectError("视觉成果需文档与持久组标记或画布区域")
+
+
+def add_decision(root, data, kind, target_id, action, scope, source, reason="", outcomes=()):
+    if not source.strip() or not scope.strip():
+        raise ProjectError("必须保存实际人类指令来源或标明人工转录，以及适用范围")
+    if kind == "stage":
+        if action != "approve":
+            raise ProjectError("stage 决定仅支持 approve")
+        number = [s[0] for s in WORKFLOW_STAGES].index(target_id) + 1
+        refs = [outcome_ref(data, value) for value in outcomes]
+        check_outcomes(data, number, refs)
+        if number == 3 and not any(r["kind"] == "idea" and r["id"] == data["selected_concept_id"] for r in refs):
+            raise ProjectError("创意选择需已由人类选中的创意")
+        target_version = WORKFLOW
+    else:
+        target = lookup(data["ideas"] if kind == "idea" else data["assets"], target_id)
+        target_version = target["version"]
+        refs = [outcome_ref(data, kind + ":" + target_id)]
+        if action == "select" and kind != "idea":
+            raise ProjectError("select 仅用于创意；不会切换 Krita 可见状态")
+        if action == "approve" and kind == "asset" and target["kind"] != "checkpoint":
+            raise ProjectError("批准需要独立确认快照，不批准可变工作文件")
+    for ref in refs:
+        verify_outcome(root, data, ref)
+    decision = dict(id=str(uuid.uuid4()), target_kind=kind, target_id=target_id,
+                    target_version=target_version, action=action, scope=scope, source=source,
+                    actor="human", attribution="user_supplied_or_manual_transcription_not_authenticated",
+                    at=now(), reason=reason, outcomes=refs, validity="valid", execution="recorded_not_applied")
+    data["decisions"].append(decision)
+    if action == "select":
+        data["selected_concept_id"] = target_id
+    return decision
+
+
+def verify_outcome(root, data, ref):
+    item = lookup(data["assets"] if ref["kind"] == "asset" else data["ideas"], ref["id"])
+    if item["version"] != ref["version"]:
+        raise ProjectError("成果版本已变化")
+    if ref["kind"] == "asset":
+        if fingerprint(root, item["path"]) != (ref["sha256"], item["size"]):
+            raise ProjectError("确认快照内容已变化，需复核")
+        if item["preview"] is not None:
+            p = item["preview"]
+            if fingerprint(root, p["path"]) != (p["sha256"], p["size"]):
+                raise ProjectError("确认预览已变化，需复核")
+    elif item["text_ref"]:
+        if fingerprint(root, item["text_ref"].split("#", 1)[0])[0] != item["text_ref_sha256"]:
+            raise ProjectError("全文引用已变化，需新起点版本与人工复核")
+
+
+def invalidate(data, asset_id, stage):
+    affected = {stage}
+    if stage == 5:
+        affected.update((6, 7, 8))
+    if stage == 6:
+        affected.update((7, 8))
+    if stage == 7:
+        affected.add(8)
+    for decision in data["decisions"]:
+        if any(r["kind"] == "asset" and r["id"] == asset_id for r in decision["outcomes"]) or (decision["target_kind"] == "stage" and decision["target_id"] in {WORKFLOW_STAGES[n - 1][0] for n in affected}):
+            decision["validity"] = "needs_review"
+    for number in affected:
+        stage_record = data["stages"][number - 1]
+        stage_record["needs_review"] = True
+        if stage_record["status"] == "completed":
+            stage_record["status"] = "awaiting_review"
+
+
+def refresh_reviews(root, data):
+    for decision in data["decisions"]:
+        if decision["validity"] != "valid":
+            continue
+        for ref in decision["outcomes"]:
+            try:
+                verify_outcome(root, data, ref)
+            except (OSError, ProjectError):
+                decision["validity"] = "needs_review"
+                if ref["kind"] == "asset":
+                    asset = lookup(data["assets"], ref["id"])
+                    invalidate(data, asset["id"], asset["stage"])
+                elif decision["target_kind"] == "stage":
+                    n = [s[0] for s in WORKFLOW_STAGES].index(decision["target_id"])
+                    data["stages"][n].update(needs_review=True, status="awaiting_review")
+
+
+def migration_plan(root):
+    root = Path(root).resolve(strict=True)
+    data, raw = read_state(root)
+    if data["schema_version"] != 1:
+        raise ProjectError("migration-plan 仅用于 schema 1；当前无需升级")
+    mapping = ((1,), (2,), (3, 4), (4,), (5,), (5,), (6, 8), (7, 8))
+    return {"source_sha256": hashlib.sha256(raw).hexdigest(), "source_revision": data["revision"],
+            "source_workflow_id": LEGACY_WORKFLOW, "target_workflow_id": WORKFLOW,
+            "stages": [{"stage": s["stage"], "old_name": STAGES[s["stage"] - 1],
+                        "old_status": s["status"], "candidate_stages": list(mapping[s["stage"] - 1]),
+                        "requires_human_review": True, "inherits_completed": False} for s in data["stages"]],
+            "assets": [{"id": a["id"], "path": a["path"], "legacy_stage": a["stage"],
+                        "candidate_stages": list(mapping[a["stage"] - 1])} for a in data["assets"]],
+            "sidecars": "原 sidecar 保留旧预设，不重写、不移动文件", "read_only": True}
+
+
+def upgrade(root, source_sha256, authorization, expected):
+    if not authorization or not authorization.strip():
+        raise ProjectError("升级必须显式提供授权来源")
+    root = Path(root).resolve(strict=True)
+    with locked(root):
+        old, raw = read_state(root)
+        if old["schema_version"] != 1:
+            raise ProjectError("项目已是 schema 2；未重复升级，原备份保留")
+        if old["revision"] != expected or hashlib.sha256(raw).hexdigest() != source_sha256:
+            raise ProjectError("迁移计划/修订冲突；请重新生成 migration-plan，未写入")
+        data = new_state(old["name"])
+        data.update(project_id=old["project_id"], created_at=old["created_at"], revision=old["revision"] + 1,
+                    intent_card=old["intent_card"], design_pillars=old["design_pillars"], style_anchors=old["style_anchors"])
+        # Legacy history remains explicitly legacy, never relabelled by equal numbers.
+        data["stage_history"] = [{**e, "workflow_id": LEGACY_WORKFLOW} for e in old["stage_history"]] + data["stage_history"]
+        if old["intent_card"].strip():
+            add_idea(root, data, "legacy-intent", "旧流程意图（待重新选择）", old["intent_card"])
+        for asset in old["assets"]:
+            data["assets"].append({**asset, "object_id": asset["id"], "version": asset["id"],
+                                   "workflow_id": LEGACY_WORKFLOW, "stage_id": None, "role": "legacy_unclassified",
+                                   "document_id": None, "kind": "legacy", "group_marker": None, "region": None,
+                                   "preview": None, "legacy_origin": {"stage": asset["stage"], "name": STAGES[asset["stage"] - 1], "state_sha256": source_sha256}})
+        backup = "project_state.schema1-" + datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ") + "-" + str(uuid.uuid4()) + ".json.bak"
+        data["migration"] = {"source_sha256": source_sha256, "backup": backup, "authorization": authorization,
+                             "at": now(), "legacy_stages": old["stages"], "completed_inherited": False}
+        validate(data)  # all validation before backup publication
+        # Exclusive create; failed or repeated upgrades never overwrite earlier evidence.
+        flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
+        try:
+            with os.fdopen(os.open(root / backup, flags, 0o600), "wb") as stream:
+                stream.write(raw)
+                stream.flush()
+                os.fsync(stream.fileno())
+            directory = os.open(root, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+            try:
+                os.fsync(directory)
+            finally:
+                os.close(directory)
+            atomic_write(root, data, raw)
+        except (Exception, KeyboardInterrupt) as exc:
+            raise ProjectError("升级未确认；备份步骤可能已发生，保留原状态/备份，先查看实际状态勿盲重试；backup=" + backup + ": " + str(exc)) from exc
+        return data
 
 
 def run(args):
@@ -287,6 +766,10 @@ def run(args):
         result = initialize(root, args.name)
     elif command == "status":
         result = inspect(args.root)
+    elif command == "migration-plan":
+        result = migration_plan(args.root)
+    elif command == "upgrade":
+        result = upgrade(args.root, args.source_sha256, args.authorize, args.expect_revision)
     else:
         def operation(root, data):
             if command == "edit":
@@ -298,9 +781,19 @@ def run(args):
                     if value is not None or clear:
                         data[key] = [] if clear else value
             elif command == "stage":
-                set_stage(data, args.number, args.note, args.status)
+                set_stage(data, args.number, args.note, args.status, args.approval)
+            elif command == "idea":
+                add_idea(root, data, args.id, args.title, args.text, args.text_ref, args.source, args.cluster)
+            elif command == "document":
+                add_document(root, data, args.id, args.path, args.role, args.concept, args.illustration)
+            elif command == "decision":
+                add_decision(root, data, args.kind, args.target, args.action, args.scope, args.source, args.reason, args.outcome)
             else:
-                record(root, data, args.path, args.stage, args.category, args.note)
+                region = dict(zip(("x", "y", "width", "height"), args.region)) if args.region is not None else None
+                record(root, data, args.path, args.stage, args.category, args.note,
+                       object_id=args.object_id, version=args.version, role=args.role,
+                       document_id=args.document_id, kind=args.kind,
+                       group_marker=args.group_marker, region=region, preview=args.preview)
         result = update(args.root, operation, args.expect_revision)
     print(json.dumps(result, ensure_ascii=False, indent=2))
     return result
