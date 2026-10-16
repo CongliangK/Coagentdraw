@@ -196,10 +196,13 @@ def export_project(root, output, assets, roles=(), metadata=None, zipped=False):
                     "version_record": any(v.strip() for v in extra.get("versions", []))}
         # Stage history is preserved verbatim, not inferred to be artwork-version history.
         missing = [role for role in missing if not supplied.get(role, False)]
-        if not data["intent_card"].strip():
-            missing.append("intent_card")
-        if not any(v.strip() for v in data["design_pillars"]):
-            missing.append("design_pillars")
+        if data["schema_version"] == 1:
+            if not data["intent_card"].strip():
+                missing.append("intent_card")
+            if not any(v.strip() for v in data["design_pillars"]):
+                missing.append("design_pillars")
+        elif not data["ideas"]:
+            missing.append("ideas")
         report = {"format_version": 1, "project_id": data["project_id"], "revision": data["revision"],
                   "current_stage": data["current_stage"], "assets": records,
                   "missing": sorted(missing), "missing_assets": missing_assets,
@@ -208,6 +211,12 @@ def export_project(root, output, assets, roles=(), metadata=None, zipped=False):
                        "design_pillars": data["design_pillars"], "style_anchors": data["style_anchors"],
                        "stage_history": data["stage_history"], "notes": extra,
                        "missing": report["missing"], "verification": report["verification"]}
+        if data["schema_version"] == 2:
+            report.update(schema_version=2, workflow_id=data["workflow_id"])
+            description.update({k: data[k] for k in ("workflow_id", "ideas", "selected_concept_id", "documents", "decisions")})
+            for record in records:
+                source = index[record["id"]]
+                record.update({k: source[k] for k in ("object_id", "version", "role", "workflow_id", "stage_id", "document_id", "kind")})
         (bundle / "design_notes.json").write_bytes(_json_bytes(description))
         lines = ["# " + data["name"], "", report["verification"], "", "## 意图卡", data["intent_card"],
                  "", "## 设计支柱", *["- " + v for v in data["design_pillars"]], "", "## 设计说明",

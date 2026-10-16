@@ -43,14 +43,17 @@ def http(url, payload=None, timeout=60):
 def add_project_parser(sub):
     parser = sub.add_parser("project", help="离线项目状态与成果索引（不修改作品）")
     commands = parser.add_subparsers(dest="project_cmd", required=True)
-    p = commands.add_parser("init", help="初始化八阶段目录，重复调用不会重置")
+    p = commands.add_parser("init", help="初始化 schema2/workflow 索引；不创建空表/阶段目录/KRA")
     p.add_argument("name")
     p.add_argument("--root", help="项目目录；默认仓库 _本地暂存/<项目名>")
-    for command in ("status", "edit", "stage", "record"):
+    for command in ("status", "migration-plan", "upgrade", "edit", "stage", "record", "idea", "document", "decision"):
         p = commands.add_parser(command)
         p.add_argument("root", help="项目目录；相对于当前工作目录")
-        if command != "status":
-            p.add_argument("--expect-revision", type=int, help="拒绝基于过期状态的写入")
+        if command not in ("status", "migration-plan"):
+            p.add_argument("--expect-revision", type=int, required=command == "upgrade", help="拒绝基于过期状态的写入；upgrade 必填")
+        if command == "upgrade":
+            p.add_argument("--source-sha256", required=True, help="migration-plan 返回的原状态摘要")
+            p.add_argument("--authorize", required=True, help="明确升级授权的实际来源/人工转录；不是身份认证")
         if command == "edit":
             p.add_argument("--intent", help="完整意图卡文本（可手工填写）")
             p.add_argument("--pillar", action="append", help="替换设计支柱列表，可重复")
@@ -59,13 +62,44 @@ def add_project_parser(sub):
             p.add_argument("--clear-anchors", action="store_true")
         elif command == "stage":
             p.add_argument("number", type=int, choices=range(1, 9))
-            p.add_argument("--status", choices=("pending", "in_progress", "completed"), default="in_progress")
+            p.add_argument("--status", choices=("pending", "in_progress", "awaiting_review", "completed"), default="in_progress")
+            p.add_argument("--approval", help="completed 必须引用本阶段有效批准 UUID")
             p.add_argument("--note", default="")
         elif command == "record":
             p.add_argument("path", help="相对于项目目录的现有文件路径；不复制/移动/修改文件")
             p.add_argument("--stage", type=int, choices=range(1, 9))
             p.add_argument("--category", choices=("temporary", "final"), required=True)
             p.add_argument("--note", default="")
+            p.add_argument("--object-id", help="稳定作品对象 ID；多版本沿用，默认新 UUID")
+            p.add_argument("--version", help="不可复用的对象版本 ID；默认新 UUID")
+            p.add_argument("--role", default="unspecified", help="成果身份，如 character_master_lineart；不推断批准")
+            p.add_argument("--document-id", help="已登记的工作文档 ID")
+            p.add_argument("--kind", choices=("working", "checkpoint"), default="working")
+            p.add_argument("--group-marker", help="已核对的持久随机 UUID；不是 runtime layer ID/token")
+            p.add_argument("--region", nargs=4, type=int, metavar=("X", "Y", "W", "H"), help="整文档像素坐标；不使用屏幕坐标")
+            p.add_argument("--preview", help="项目内现有预览；只记录字节摘要，不冒称采样像素摘要")
+        elif command == "idea":
+            p.add_argument("id", help="新的稳定 ID；拆分/合并/替代用新 ID，保留来源")
+            p.add_argument("title")
+            text = p.add_mutually_exclusive_group(required=True)
+            text.add_argument("--text", default="", help="轻量短文本；不要求完整意图卡")
+            text.add_argument("--text-ref", help="项目内 Markdown 路径，可带 #稳定段落ID")
+            p.add_argument("--source", action="append", default=[], help="来源起点 ID，可重复；一源多分支/多源合并")
+            p.add_argument("--cluster", action="append", default=[], help="素材簇 ID，仅引用，不导入画布")
+        elif command == "document":
+            p.add_argument("id")
+            p.add_argument("path", help="项目内已保存 KRA；工作文件可正常保存，不改变旧确认快照")
+            p.add_argument("--role", choices=("ideation", "character", "turnaround", "illustration"), required=True)
+            p.add_argument("--concept", help="关联起点/创意 ID；非 ideation 必填")
+            p.add_argument("--illustration", help="插画 ID；illustration 角色必填")
+        elif command == "decision":
+            p.add_argument("kind", choices=("idea", "asset", "stage"))
+            p.add_argument("target", help="对象 ID；stage 使用稳定 stage_id")
+            p.add_argument("action", choices=("approve", "select", "reject", "defer"))
+            p.add_argument("--scope", required=True, help="具体适用范围；不产生全局永久禁令")
+            p.add_argument("--source", required=True, help="实际人类指令来源/人工转录，非模型自报 human")
+            p.add_argument("--reason", default="")
+            p.add_argument("--outcome", action="append", default=[], help="stage approve 必要成果 idea:ID / asset:ID，可重复")
 
 
 
@@ -87,6 +121,10 @@ def add_stage_parser(sub):
         p.add_argument("--state", required=True, help="独立 *.cwb-stage.json 文件；保留并备份")
         if command == "setup":
             p.add_argument("number", type=int, choices=range(1, 9))
+            p.add_argument("--workflow", choices=("legacy-eight-stage-v1", "krita-character-illustration-v1"),
+                           help="新 sidecar 默认旧流程；已有 sidecar 省略则沿用，不自动迁移")
+            p.add_argument("--role", choices=("ideation", "character", "turnaround", "illustration"),
+                           help="新 workflow 首次必填；按文档角色建组，不在一文档建八阶段")
         if command != "status":
             p.add_argument("--document", required=True, help="已保存的活动 .kra 绝对或相对路径")
         if command == "import-diagnostic":
@@ -198,6 +236,7 @@ def add_candidates_parser(sub):
 
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--version", action="version", version="cwb: project schema1(read-only)/2; workflow krita-character-illustration-v1; stage sidecar1/2")
     sub = ap.add_subparsers(dest="cmd", required=True)
 
     sub.add_parser("ping")

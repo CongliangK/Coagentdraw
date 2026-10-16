@@ -15,6 +15,8 @@ import stat
 import tempfile
 import uuid
 
+from cwb_workflow import WORKFLOW, LEGACY_WORKFLOW, DOCUMENT_STAGES, document_specs
+
 
 # 最小组织预设，不表示阶段完成，也不自动生成设计内容。
 PRESETS = {
@@ -38,9 +40,15 @@ def now():
     return datetime.now(timezone.utc).isoformat()
 
 
-def specs(number):
+def specs(number, workflow=LEGACY_WORKFLOW, role=None):
     if type(number) is not int or number not in PRESETS:
         raise StageError("阶段必须为 1–8")
+    if workflow == WORKFLOW:
+        if role not in DOCUMENT_STAGES or number not in DOCUMENT_STAGES[role]:
+            raise StageError("新 workflow 必须选择兼容阶段的 --role 文档角色")
+        return document_specs(role)
+    if workflow != LEGACY_WORKFLOW or role is not None:
+        raise StageError("未知 workflow 或旧预设不支持文档角色")
     title, children = PRESETS[number]
     root = str(number)
     return [(root, "{:02d} {}".format(number, title), None)] + [
@@ -56,8 +64,14 @@ def marker(token):
 
 def validate(data):
     try:
-        if type(data["schema_version"]) is not int or data["schema_version"] != 1:
+        if type(data["schema_version"]) is not int or data["schema_version"] not in (1, 2):
             raise ValueError("未知版本")
+        if data["schema_version"] == 1:
+            definitions = ALL_SPECS  # frozen old keys, never checked with v2 labels
+        else:
+            if data["workflow_id"] != WORKFLOW or data["document_role"] not in DOCUMENT_STAGES:
+                raise ValueError("未知 workflow/文档角色")
+            definitions = {key: (label, parent) for key, label, parent in document_specs(data["document_role"])}
         uuid.UUID(data["sidecar_id"])
         if not Path(data["document"]).is_absolute():
             raise ValueError("文档必须为绝对路径")
@@ -65,7 +79,7 @@ def validate(data):
             raise ValueError("无效记录")
         tokens = set()
         for key, group in data["groups"].items():
-            if key not in ALL_SPECS:
+            if key not in definitions:
                 raise ValueError("未知预设组")
             token = group["token"]
             if str(uuid.UUID(token)) != token or token in tokens:
@@ -77,7 +91,7 @@ def validate(data):
                 raise ValueError("无效节点 ID")
             if group["status"] == "verified" and not group.get("id"):
                 raise ValueError("缺少已核验节点 ID")
-            if group["name"] != ALL_SPECS[key][0] + " " + marker(token):
+            if group["name"] != definitions[key][0] + " " + marker(token):
                 raise ValueError("创建名称与身份不一致")
         if data["session"] is not None:
             if type(data["session"]["pid"]) is not int or not isinstance(data["session"]["root"], str):
@@ -258,9 +272,12 @@ def canonical_document(value):
     return str(path)
 
 
-def execute(number, document, state_path, request, diagnostic=None, name="诊断 PNG"):
+def execute(number, document, state_path, request, diagnostic=None, name="诊断 PNG", *, workflow=None, role=None):
     """request(path, payload=None) 由 CLI 注入；mock 无网络/Qt 依赖。"""
-    wanted = specs(number)
+    if workflow is not None and workflow not in (LEGACY_WORKFLOW, WORKFLOW):
+        raise StageError("未知 workflow")
+    if workflow is not None and (role is not None or workflow == LEGACY_WORKFLOW):
+        specs(number, workflow, role)  # reject incompatible explicit context before any request
     document = canonical_document(document)
     source = None
     if diagnostic is not None:
@@ -276,6 +293,14 @@ def execute(number, document, state_path, request, diagnostic=None, name="诊断
         data = store.load()
         if data is not None and data["document"] != document:
             raise StageError("sidecar 绑定了另一文档，拒绝写入")
+        bound_workflow = (WORKFLOW if data and data["schema_version"] == 2 else LEGACY_WORKFLOW)
+        selected_workflow = workflow or bound_workflow
+        selected_role = role or (data.get("document_role") if data else None)
+        if data and (selected_workflow != bound_workflow or selected_role != data.get("document_role")):
+            raise StageError("sidecar workflow/文档角色冲突；旧 sidecar 不自动升级")
+        wanted = specs(number, selected_workflow, selected_role)
+        if source is not None and selected_workflow != LEGACY_WORKFLOW:
+            raise StageError("import-diagnostic 保留旧06接口；新文档请显式使用通用 add，不按编号误导入")
         snap = snapshot(request, document)
         if data is None:
             if source is not None:
@@ -283,6 +308,8 @@ def execute(number, document, state_path, request, diagnostic=None, name="诊断
             data = {"schema_version": 1, "sidecar_id": str(uuid.uuid4()),
                     "document": document, "session": snap["session"],
                     "groups": {}, "pending": None, "events": []}
+            if selected_workflow == WORKFLOW:
+                data.update(schema_version=2, workflow_id=WORKFLOW, document_role=selected_role)
         if data["pending"] is not None:
             # 已发送请求即使树里有标记也可能未完成；不得把部分成功当成成功。
             raise StageError("存在未确认操作；先人工核对 sidecar pending 与最新 layers，禁止自动重试")
@@ -314,7 +341,8 @@ def execute(number, document, state_path, request, diagnostic=None, name="诊断
                 result, snap = perform(store, data, request, document, snap, operation, "/layer/group", "grouplayer")
                 ids[key] = result["id"]
                 created.append(key)
-        return {"stage": number, "created": created, "groups": ids, "state": str(store.path),
+        return {"stage": number, "workflow_id": selected_workflow, "document_role": selected_role,
+                "created": created, "groups": ids, "state": str(store.path),
                 "diagnostic_imported": source is not None, "imported_layer": imported}
 
 
@@ -389,5 +417,6 @@ def run(args, http, base):
 
     result = execute(args.number if args.stage_cmd == "setup" else 6,
                      args.document, args.state, request,
-                     diagnostic=getattr(args, "png", None), name=getattr(args, "name", "诊断 PNG"))
+                     diagnostic=getattr(args, "png", None), name=getattr(args, "name", "诊断 PNG"),
+                     workflow=getattr(args, "workflow", None), role=getattr(args, "role", None))
     print(json.dumps(result, ensure_ascii=False, indent=2))
