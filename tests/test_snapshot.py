@@ -105,8 +105,9 @@ class Doc:
         self.w, self.h = width, height
         self.uid = str(uuid.uuid4())
         self.model, self.depth, self.profile = "RGBA", "U8", snapshot.SUPPORTED_PROFILE
-        # BGRA: opaque red, half-alpha green, transparent blue, then black.
-        self.bgra = bytes([0, 0, 255, 255, 0, 255, 0, 128, 255, 0, 0, 0]) * (width * height // 3)
+        # RGBA order (live-verified 2026-10, Krita 6.0.4): opaque blue,
+        # half-alpha green, transparent red, repeating.
+        self.pixels = bytes([0, 0, 255, 255, 0, 255, 0, 128, 255, 0, 0, 0]) * (width * height // 3)
         self.mask = Selection(bytes([0, 128, 255, 1, 254, 0]))
         self.events = []
         self.on_pixels = None
@@ -128,7 +129,7 @@ class Doc:
         self.events.append(("projection", rect))
         if self.on_pixels:
             self.on_pixels()
-        return self.bgra
+        return self.pixels
 
     def selection(self):
         self.events.append("selection")
@@ -147,13 +148,11 @@ class App:
 
 
 class Codec(unittest.TestCase):
-    def test_bgra_straight_alpha_and_transparent_rgb_are_exact(self):
-        bgra = bytes([3, 2, 1, 255, 30, 20, 10, 128, 9, 8, 7, 0])
-        expected = bytes([1, 2, 3, 255, 10, 20, 30, 128, 7, 8, 9, 0])
-        rgba = snapshot.bgra_to_rgba(bgra, 3, 1)
-        self.assertEqual(rgba, expected)
+    def test_pixeldata_bytes_pass_through_unchanged(self):
+        # Live-verified 2026-10: pixelData is native RGBA order; no B/R swap.
+        rgba = bytes([3, 2, 1, 255, 30, 20, 10, 128, 9, 8, 7, 0])
         decoded = decode_png(snapshot.encode_png(rgba, 3, 1, 4))
-        self.assertEqual(decoded[:4], (3, 1, 4, expected))
+        self.assertEqual(decoded[:4], (3, 1, 4, rgba))
         # Untagged RGBA: agent vision decoders misrender the sRGB chunk.
         self.assertNotIn(b"sRGB", decoded[4])
         self.assertNotIn(b"iCCP", decoded[4])
@@ -173,14 +172,6 @@ class Codec(unittest.TestCase):
                                              (32769, 1, b"", 1)]:
             with self.subTest(width=width, channels=channels), self.assertRaises(snapshot.SnapshotError):
                 snapshot.encode_png(data, width, height, channels)
-        with self.assertRaises(snapshot.SnapshotError):
-            snapshot.bgra_to_rgba(b"abc", 1, 1)
-
-    def test_invalid_native_buffer_is_not_synthesized_as_zeroes(self):
-        for data in (4, True, "abcd", None, object()):
-            with self.subTest(data=data), self.assertRaises(snapshot.SnapshotError):
-                snapshot.bgra_to_rgba(data, 1, 1)
-
     def test_empty_edge_and_feather_bounds(self):
         self.assertIsNone(snapshot.mask_bounds(bytes(6), 3, 2))
         self.assertEqual(snapshot.mask_bounds(bytes([0, 0, 1, 0, 0, 0]), 3, 2),
@@ -236,7 +227,7 @@ class Exports(unittest.TestCase):
     def test_1328_rectangle_feather_edges_and_half_alpha(self):
         doc = self.app.doc
         doc.w = doc.h = 1328
-        doc.bgra = bytes([19, 41, 227, 128]) * (1328 * 1328)
+        doc.pixels = bytes([19, 41, 227, 128]) * (1328 * 1328)
         mask = bytearray(1328 * 1328)
         for y in range(1326, 1328):
             mask[y * 1328 + 1325:(y + 1) * 1328] = bytes([1, 128, 255])
@@ -244,7 +235,7 @@ class Exports(unittest.TestCase):
         result = self.pair()
         self.assertEqual(result["selection"]["bounds"], {"x": 1325, "y": 1326, "width": 3, "height": 2})
         self.assertEqual(result["selection"]["native_bounds"], result["selection"]["bounds"])
-        self.assertEqual(decode_png(self.p.read_bytes())[:4], (1328, 1328, 4, bytes([227, 41, 19, 128]) * (1328 * 1328)))
+        self.assertEqual(decode_png(self.p.read_bytes())[:4], (1328, 1328, 4, bytes([19, 41, 227, 128]) * (1328 * 1328)))
         self.assertEqual(decode_png(self.m.read_bytes())[:4], (1328, 1328, 1, bytes(mask)))
 
     def test_native_outside_bounds_not_used_as_crop(self):
@@ -267,7 +258,7 @@ class Exports(unittest.TestCase):
     def test_format_profile_lengths_and_no_document_fail_before_publish(self):
         doc = self.app.doc
         for attr, bad in (("model", "CMYKA"), ("depth", "U16"), ("profile", "linear-sRGB.icc"),
-                          ("bgra", b"short")):
+                          ("pixels", b"short")):
             old = getattr(doc, attr)
             with self.subTest(attr=attr), patch.object(doc, attr, bad), self.assertRaises(snapshot.SnapshotError):
                 self.pair()

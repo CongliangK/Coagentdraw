@@ -68,7 +68,7 @@
 | `/doc/new` `/doc/save` | POST | 新建 RGBA8 文档 / 另存 .kra |
 | `/doc/export` `/doc/selection_png` | POST | 整画布合成投影 / 原生灰度选区 PNG（各自独立采样） |
 | `/doc/snapshot` | POST | 一次主线程回调配对捕获投影和选区，附会话 token 与像素摘要 |
-| `/layer/png` | POST | 图层像素导出 PNG |
+| `/layer/png` | POST | 图层像素导出 PNG；默认 `underlay=magenta` 把透明区渲染为不透明洋红底衬（供智能体读图，响应含 alpha 覆盖数/画布包围盒/近洋红内容告警），`underlay=none` 保留原生 alpha（如喂 ComfyUI） |
 | `/layer/group` | POST | 新建图层组，可用 parent_id 嵌套、above 定位同级 |
 | `/layer/add` | POST | PNG → 新透明 paint 图层（keep_size / fit_canvas / insert_at_offset，保留 parent_id/above/offset） |
 | `/layer/vector` | POST | 受控短文字/line/rect SVG → 新 vectorlayer；仅明确专用已保存活动文档，严格结构回读，不承诺实机编辑 |
@@ -119,3 +119,5 @@ python3 core/cwb.py save 作品.kra
 - `createDocument(w,h,name,"RGBA","U8","",dpi)`(colorDepth 是 "U8",非 "RGBA U8")
 - root 层无 `x()/y()`,统一用 `bounds()`;无 `setDirty`
 - PyQt6 `constBits()` 是 voidptr,需 `asarray(bpl*h)`
+- `Document.pixelData`/`Node.pixelData` 实测返回 RGBA 字节序(2026-10, 6.0.4 AppImage);投影导出不做 B/R 交换(早期 BGRA 假设曾使投影红蓝互换)
+- `Document.pixelData`/`Node.pixelData` 实测返回 RGBA 字节序(2026-10, 6.0.4 AppImage);投影导出不做 B/R 交换(早期 BGRA 假设曾使投影红蓝互换)

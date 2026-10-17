@@ -49,12 +49,9 @@ def _pixels(data, width, height, channels):
     return raw
 
 
-def bgra_to_rgba(data, width, height):
-    """Krita RGBA/U8 Document.pixelData: BGRA -> straight RGBA, retain alpha."""
-    raw = _pixels(data, width, height, 4)
-    out = bytearray(raw)
-    out[0::4], out[2::4] = raw[2::4], raw[0::4]
-    return bytes(out)
+# Live-verified 2026-10 (Krita 6.0.4 AppImage): Document.pixelData and
+# Node.pixelData both return native RGBA order. An earlier B/R swap here
+# traded red and blue in every projection export; it must not come back.
 
 
 def _chunk(kind, payload):
@@ -252,10 +249,10 @@ class SnapshotService:
         sampled_at = datetime.now(timezone.utc).isoformat(timespec="microseconds")
         captured, details = {}, {}
         if "projection" in paths:
-            bgra = _pixels(doc.pixelData(0, 0, width, height), width, height, 4)
-            captured["projection"] = bgra_to_rgba(bgra, width, height)
-            details["projection"] = {"source": "Document.pixelData", "source_layout": "BGRA8",
-                                     "source_sha256": _digest(bgra), "pixel_layout": "RGBA8",
+            raw = _pixels(doc.pixelData(0, 0, width, height), width, height, 4)
+            captured["projection"] = raw
+            details["projection"] = {"source": "Document.pixelData", "source_layout": "RGBA8",
+                                     "source_sha256": _digest(raw), "pixel_layout": "RGBA8",
                                      "alpha": "straight; preserved", "color_profile": SUPPORTED_PROFILE}
         if "selection" in paths:
             if selection_mode == "full_canvas":
