@@ -182,19 +182,17 @@ def layer_png(layer_id, path, underlay="magenta"):
                 len(data), b.width() * b.height() * 4
             )
         )
-    from .snapshot import alpha_summary, flatten_over_magenta
+    from .snapshot import alpha_summary, encode_png, flatten_over_magenta, swap_rb, _fs_bytes
+    data = swap_rb(data, b.width(), b.height())  # pixelData 是 BGRA;PNG 语义是 RGBA
     summary = alpha_summary(data, b.width(), b.height())
     near = None
     if underlay == "magenta":
         data, near = flatten_over_magenta(data, b.width(), b.height())
-    img = QImage(
-        bytes(data), b.width(), b.height(), b.width() * 4,
-        QImage.Format.Format_RGBA8888,
-    )
     out_path = os.path.abspath(os.path.expanduser(path))
     os.makedirs(os.path.dirname(out_path) or ".", exist_ok=True)
-    if not img.save(out_path, "PNG"):
-        raise OpError("PNG 写入失败: {0}".format(out_path))
+    png = encode_png(data, b.width(), b.height(), 4)
+    with open(_fs_bytes(out_path), "wb") as stream:
+        stream.write(png)
     bbox = summary["bbox"]
     if bbox is not None:
         bbox = {"x": bbox["x"] + b.x(), "y": bbox["y"] + b.y(),
@@ -357,6 +355,9 @@ def layer_add(png_path, name, above_layer_id=None, offset_x=0, offset_y=0,
         del raw, img
         w, h = mapping["output_size"]
         off_x, off_y = mapping["origin"]
+        from .snapshot import swap_rb
+        buf = swap_rb(buf, w, h)  # setPixelData 期望 BGRA(Krita 原生序);Qt 解码产物是 RGBA
+        mapping["pixel_layout"] = "BGRA8"
         budget.check("创建节点前")
         layer = _create_attached(doc, name, "paintLayer", parent, above_node,
                                  before_attach=lambda: budget.check("挂树前"))

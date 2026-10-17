@@ -49,7 +49,7 @@ python3 core/cwb.py snapshot /tmp/projection.png /tmp/selection.png --overwrite 
 - `width`、`height`、`origin = {"x": 0, "y": 0}`：文档整画布，坐标不随选区或节点 bounds 移动。
 - `sampled_at`：投影刷新完成后、第一次像素读取前的 UTC 时间（含微秒和时区）；`sample_started_monotonic_ns` / `sample_finished_monotonic_ns` 为读像素窗口，不包含 PNG 编码与磁盘写入。
 - 每个图像的 `pixel_sha256`、`pixel_bytes`：PNG 解码后规范像素数组的 SHA-256 和长度（投影 RGBA8、蒙版 Gray8）；`path`、`file_bytes`、`file_sha256`：已发布 PNG 的文件信息。
-- `projection` 另有 `source = Document.pixelData`、`source_layout = RGBA8`、`source_sha256`（编码前原始数据，与 `pixel_sha256` 相同）、`pixel_layout = RGBA8`、`alpha`、`color_profile`。
+- `projection` 另有 `source = Document.pixelData`、`source_layout = BGRA8`、`source_sha256`（交换前原始数据）、`pixel_layout = RGBA8`、`alpha`、`color_profile`。
 - `selection` 另有 `source`、`mode`、`pixel_layout = Gray8`、`alpha = none`、`coverage`；`native_bounds` 保留原生选区边界（可能越出画布），`bounds` 是完整画布单通道数据中所有非零覆盖像素的紧致包围盒。两者均为 `x/y/width/height`，不用于裁剪。显式全画布模式 `native_bounds = null`。
 
 **不能**把两个单独请求的相同 token、尺寸、文件名、甚至时间戳当成同一快照。只有配对入口会在 **一次**现有 `MainThreadBridge.call` 的回调内获取两份像素，然后统一编码/发布；不会发出两个桥调用，也不调用 `processEvents()`。同一回调不是 Krita 内部数据库事务；当前未声称拥有对所有 Krita 后台作业的排他锁。
@@ -58,11 +58,12 @@ python3 core/cwb.py snapshot /tmp/projection.png /tmp/selection.png --overwrite 
 
 1. 只接受根节点 `RGBA/U8`，并明确收窄到 `Document.colorProfile() == sRGB-elle-V2-srgbtrc.icc`。CMYK、U16/F16 等和其他 ICC（包括线性 sRGB / 广色域）均拒绝，不静默转换或丢弃色彩解释。后续扩大白名单需要独立数值证据。
 2. 投影调用 `Document.pixelData(0, 0, width, height)`，不读取任何节点的 `bounds()` / `pixelData()`，不复用旧的 `/layer/png`。要求长度严格为 `width*height*4`。
-3. `Document.pixelData` 原始字节**直接使用，不交换 B/R**——2026-10 实机验证（Krita 6.0.4 AppImage）：其返回**原生 RGBA 字节序**，与 `Node.pixelData` 一致；早期"BGRA 假设"的交换使所有投影导出红蓝互换，已移除。PNG 为 8-bit straight RGBA（color type 6），保留半透明 Alpha 和透明像素的 RGB；不自行预乘/反预乘。PNG **不带 sRGB/gAMA/iCCP 色彩元数据 chunk**：像素已在上游收窄为 sRGB profile，未标记 PNG 按惯例即按 sRGB 解读；且实测部分智能体视觉解码管线遇到显式 sRGB chunk 会把整帧误渲染为黑帧（2026-10 离线对照确认），故不再写入。真实 Krita 是否按该约定返回，仍须实机验证，离线数据不能证明。
+3. `Document.pixelData` 返回 **BGRA 字节序**（Krita 原生 ARGB 内存布局），投影编码前交换 B/R。2026-10 实机确认（Krita 6.0.4 AppImage）：把 RGBA 字节直写 `setPixelData` 会在画布呈现红蓝互换；同期一次依据对称黑白样本作出的"RGBA 直通"判断是误读——**字节序验证必须使用非对称彩色样本并对照画布外观**。PNG 为 8-bit straight RGBA（color type 6），保留半透明 Alpha 和透明像素的 RGB；不自行预乘/反预乘。PNG **不带 sRGB/gAMA/iCCP 色彩元数据 chunk**：像素已在上游收窄为 sRGB profile，未标记 PNG 按惯例即按 sRGB 解读；且实测部分智能体视觉解码管线遇到显式 sRGB chunk 会把整帧误渲染为黑帧（2026-10 离线对照确认），故不再写入。
 4. 选区只用 `Selection.pixelData(0, 0, width, height)`，严格检查长度 `width*height`，不通过 QColor、QImage RGBA 或 bounds 重构蒙版；0、128、255 和所有羽化值原样保存。
 5. 蒙版 PNG 是 8-bit **单通道灰度**（color type 0），**没有 Alpha，也不含 tRNS/gamma/色彩配置**。`M=0` 未选，`M=255` 全选，`M=128` 为 128/255 覆盖，不反转、不阈值化、不做 gamma。渲染器将灰度图显示为不透明属于预期。未来消费者必须按灰度通道读取；不能直接假定 ComfyUI `LoadImage.MASK`（通常由 Alpha 得到）就是这份蒙版。
 6. 采样顺序：`waitForDone()` → `refreshProjection()` → `waitForDone()` → 文档/选区读取。仅刷新投影缓存，没有文档/图层/选区 setter、合并、保存、undo 操作。刷新是否充分、是否保持实际 modified/undo 状态，必须用真实 Krita 验证，不能仅凭本测试替身计数声称作品未变。
 7. 采样前后校验 token/epoch 与文档尺寸；变化则丢弃数据、不发布文件。不实现内容锁，token 也不能证明用户没有在两次请求之间编辑。
+8. 输入/输出路径在 OS 调用层一律用显式 UTF-8 字节：Krita AppImage 内置 Python 的文件系统编码可能非 UTF-8（2026-10 实测：str 路径含任何非 ASCII 字节即 ENOENT，文件实际存在）；字节路径完全绕过该编码器。路径校验语义（.png 后缀/符号链接拒绝/存在性/同文件判定）不变。
 
 PNG 编码全部使用 Python 标准库，按行无损编码，无 Qt 的 `QImage.save()` 成败歧义。固定输入像素得到相同解码数值与像素摘要；不同 Python/zlib 版本不承诺 PNG 压缩字节完全一致，应分别使用文件摘要与像素摘要。
 
@@ -96,7 +97,7 @@ PNG 编码全部使用 Python 标准库，按行无损编码，无 Qt 的 `QImag
 |---|---|---|
 | API/CLI、主线程一次配对、127.0.0.1 | 路由/bridge 调用数、必填字段、CLI payload/帮助零网络零缓存测试 | 未启动/安装插件 |
 | Document 整画布，不用节点 bounds | 替身 root 没有 bounds/pixelData，断言文档读取 (0,0,w,h) | Krita 可见合成与隐藏/组层需核对 |
-| RGBA 直通（无交换）、半透明、透明 RGB | 真 PNG 解码 CRC/type 与精确通道测试 | 字节序 2026-10 实机验证为 RGBA；其他 Krita 版本一致性待回归 |
+| BGRA→RGBA 交换、半透明、透明 RGB | 真 PNG 解码 CRC/type 与精确通道测试 | 字节序 2026-10 实机验证为 BGRA（彩色样本+画布对照）；其他 Krita 版本一致性待回归 |
 | 1328²、矩形/羽化、画布边缘 | 1328² 全尺寸 PNG，右下角矩形覆盖 1/128/255；另覆盖所有 0..255 数值和边界 | Krita 建立同尺寸选区后逐点核对待验 |
 | 无选区、全零、显式全画布 | 拒绝前两者且不发布；显式全白并标模式 | 真 Selection 空值语义待验 |
 | 原生完整单通道、边界/长度 | 完整画布、越界 native_bounds、短长数据拒绝 | Krita Selection API 待验 |

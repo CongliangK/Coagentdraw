@@ -119,4 +119,5 @@ python3 core/cwb.py save 作品.kra
 - `createDocument(w,h,name,"RGBA","U8","",dpi)`(colorDepth 是 "U8",非 "RGBA U8")
 - root 层无 `x()/y()`,统一用 `bounds()`;无 `setDirty`
 - PyQt6 `constBits()` 是 voidptr,需 `asarray(bpl*h)`
-- `Document.pixelData`/`Node.pixelData` 实测返回 RGBA 字节序(2026-10, 6.0.4 AppImage);投影导出不做 B/R 交换(早期 BGRA 假设曾使投影红蓝互换)
+- `pixelData`/`setPixelData` 实测为 BGRA 字节序(2026-10, 6.0.4 AppImage, 彩色样本+画布对照);投影导出与图层导入均在边界交换 B/R
+- Krita AppImage 内置 Python 文件系统编码可能非 UTF-8(实测 str 非ASCII路径 ENOENT);插件文件 I/O 用显式 UTF-8 字节路径

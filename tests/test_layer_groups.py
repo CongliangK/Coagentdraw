@@ -176,7 +176,8 @@ class Operations(unittest.TestCase):
         self.assertEqual(outer_node.name(), '剪影')
         self.assertEqual(inner_node.name(), '结构')
         self.assertEqual([n.uid for n in inner_node.children], [paint['id'], second['id']])
-        self.assertEqual(inner_node.children[0].pixels, (b'abcdefgh', 0, 0, 1, 2))
+        # setPixelData receives BGRA: swap_rb exchanges bytes 0<->2 ('abcd'->'cbad').
+        self.assertEqual(inner_node.children[0].pixels, (b'cbadgfeh', 0, 0, 1, 2))
         self.assertEqual(paint['parent_id'], inner['id'])
         self.assertEqual(self.doc.refreshes, 4)
 

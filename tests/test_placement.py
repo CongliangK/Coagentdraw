@@ -17,6 +17,7 @@ from unittest.mock import Mock, patch
 import test_layer_groups as groups
 
 placement = groups.load_module('_cad14_placement', groups.ROOT / 'core/krita_cowork/placement.py')
+snapshot = groups.load_module('_cad13_snapshot', groups.ROOT / 'core/krita_cowork/snapshot.py')
 
 
 def fixture(width=7, height=5):
@@ -183,6 +184,15 @@ class ResourceBudgets(unittest.TestCase):
         for dims in ((8192, 8192, 8191, 8191), (4096, 4096, 4095, 4095)):
             with self.subTest(dims=dims), self.assertRaisesRegex(placement.PlacementError, '预算'):
                 placement.plan_placement(*dims, mode='fit_canvas')
+
+    def test_non_ascii_input_path_reads(self):
+        # 2026-10 live: Krita's embedded Python fails str paths holding
+        # non-ASCII bytes; prepare_png must open explicit UTF-8 bytes.
+        path = Path(self.tmp.name) / '输入.png'
+        path.write_bytes(png_header(8, 8))
+        encoded, plan = placement.prepare_png(str(path), 16, 16)
+        self.assertEqual(plan['source_size'], [8, 8])
+        self.assertTrue(encoded.startswith(b'\x89PNG'))
 
     def test_decoder_and_tree_traps_for_overbudget_and_malformed_png(self):
         for content in (png_header(8192, 8192), png_header(32768, 32768),
@@ -379,7 +389,8 @@ class ImportOperations(unittest.TestCase):
                                       offset_x=9, offset_y=11)
         self.assertEqual(parent.children[0], anchor)
         self.assertEqual(anchor.pixels, b'original bytes')
-        self.assertEqual(parent.children[1].pixels, (fixture(), 9, 11, 7, 5))
+        # ops.layer_add swaps to BGRA before setPixelData (Krita native order).
+        self.assertEqual(parent.children[1].pixels, (snapshot.swap_rb(fixture(), 7, 5), 9, 11, 7, 5))
         self.assertEqual(result['placement']['origin'], [9, 11])
         self.assertEqual(result['parent_id'], group['id'])
         self.assertEqual(result['width'], 7)
@@ -388,9 +399,10 @@ class ImportOperations(unittest.TestCase):
         with patch.object(self.doc, 'width', return_value=4), patch.object(self.doc, 'height', return_value=3):
             result = groups.ops.layer_add('fixture.png', 'fit', fit_canvas=True)
         expected = b''.join(pixel(fixture(), 7, x, y) for y in (1, 3) for x in (0, 2, 4, 6))
-        self.assertEqual(self.doc.created[-1].pixels, (expected, 0, 0, 4, 2))
+        self.assertEqual(self.doc.created[-1].pixels, (snapshot.swap_rb(expected, 4, 2), 0, 0, 4, 2))
         expected_plan = placement.plan_placement(7, 5, 4, 3, mode='fit_canvas')
         expected_plan['resources'] = placement.resource_estimate(7, 5, 4, 2, 32)
+        expected_plan['pixel_layout'] = 'BGRA8'
         self.assertEqual(result['placement'], expected_plan)
 
     def test_invalid_parameters_never_create_attach_or_write(self):
@@ -516,7 +528,8 @@ class Contract(unittest.TestCase):
             status, result = routing.request('/layer/add', body)
             self.assertEqual(status, 200)
             self.assertEqual(result['placement']['origin'], [2, 3])
-            self.assertEqual(doc.created[-1].pixels, (fixture(), 2, 3, 7, 5))
+            self.assertEqual(doc.created[-1].pixels,
+                         (snapshot.swap_rb(fixture(), 7, 5), 2, 3, 7, 5))
             for value in (-0.5, 1.9, True, math.inf, math.nan, 10**200):
                 count = len(doc.created)
                 self.assertEqual(routing.request('/layer/add', {**body, 'offset_x': value})[0], 400)

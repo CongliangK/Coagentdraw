@@ -7,7 +7,6 @@ projection before sampling. No event loop is pumped between the two reads.
 """
 import hashlib
 import os
-from pathlib import Path
 import struct
 import tempfile
 import time
@@ -49,10 +48,27 @@ def _pixels(data, width, height, channels):
     return raw
 
 
-# Live-verified 2026-10 (Krita 6.0.4 AppImage): Document.pixelData and
-# Node.pixelData both return native RGBA order. An earlier B/R swap here
-# traded red and blue in every projection export; it must not come back.
+# Live-verified 2026-10 (Krita 6.0.4 AppImage): pixelData/setPixelData use
+# BGRA byte order (native ARGB memory layout). A colored import written as
+# raw RGBA renders R/B-swapped on the Krita canvas, and black-and-white
+# roundtrips cannot expose this — only asymmetric color samples can.
 MAGENTA = (255, 0, 255)
+
+
+def swap_rb(data, width, height):
+    """One B/R exchange per 4-byte group; converts BGRA <-> RGBA either way."""
+    raw = _pixels(data, width, height, 4)
+    out = bytearray(raw)
+    out[0::4], out[2::4] = raw[2::4], raw[0::4]
+    return bytes(out)
+
+
+def _fs_bytes(path):
+    """Explicit UTF-8 bytes for OS calls: Krita's embedded Python may run with
+    a non-UTF-8 filesystem encoding (live-verified 2026-10: str paths with any
+    non-ASCII byte fail with ENOENT even when the file exists). Bytes paths
+    bypass the codec entirely."""
+    return path.encode("utf-8") if isinstance(path, str) else path
 
 
 def alpha_summary(data, width, height):
@@ -206,18 +222,21 @@ def _output_paths(paths, overwrite):
     for kind, value in paths.items():
         if not isinstance(value, str) or not value.strip() or "\0" in value:
             raise SnapshotError("输出路径必须是非空字符串")
-        path = Path(value).expanduser()
-        if path.is_symlink():
-            raise SnapshotError("拒绝覆盖符号链接: {0}".format(path))
-        path = path.resolve()
-        if path.suffix.lower() != ".png" or not path.parent.is_dir():
-            raise SnapshotError("输出须为 .png 且父目录必须已存在: {0}".format(path))
-        if path.exists() and (not overwrite or not path.is_file()):
-            raise SnapshotError("输出已存在或不是普通文件; 覆盖须显式 overwrite=true: {0}".format(path))
+        raw = os.path.abspath(os.path.expanduser(value))
+        fb = _fs_bytes(raw)
+        if os.path.islink(fb):
+            raise SnapshotError("拒绝覆盖符号链接: {0}".format(raw))
+        resolved = os.path.realpath(fb)
+        if (os.path.splitext(resolved)[1].lower() != b".png" or
+                not os.path.isdir(os.path.dirname(resolved))):
+            raise SnapshotError("输出须为 .png 且父目录必须已存在: {0}".format(raw))
+        if os.path.exists(resolved) and (not overwrite or not os.path.isfile(resolved)):
+            raise SnapshotError("输出已存在或不是普通文件; 覆盖须显式 overwrite=true: {0}".format(raw))
         for previous in result.values():
-            if path == previous or (path.exists() and previous.exists() and os.path.samefile(path, previous)):
+            if resolved == previous or (os.path.exists(resolved) and os.path.exists(previous)
+                                        and os.path.samefile(resolved, previous)):
                 raise SnapshotError("投影与选区输出必须是不同文件")
-        result[kind] = path
+        result[kind] = resolved
     return result
 
 
@@ -231,8 +250,9 @@ def publish_pngs(outputs, overwrite):
     staged, published = [], []
     try:
         for path, png in outputs:
-            fd, name = tempfile.mkstemp(prefix=".cwb-snapshot-", suffix=".png", dir=str(path.parent))
-            temporary = Path(name).resolve()
+            fd, name = tempfile.mkstemp(prefix=b".cwb-snapshot-", suffix=b".png",
+                                        dir=os.path.dirname(path))
+            temporary = os.path.realpath(name)
             staged.append(temporary)
             with os.fdopen(fd, "wb") as stream:
                 if stream.write(png) != len(png):
@@ -246,13 +266,13 @@ def publish_pngs(outputs, overwrite):
                 os.replace(temporary, path)
             else:
                 os.link(temporary, path)
-            published.append(str(path))
+            published.append(path.decode("utf-8"))
     except OSError as exc:
         raise SnapshotError("PNG 发布失败; published_paths={0}; {1}".format(published, exc)) from exc
     finally:
         for temporary in staged:
             try:
-                temporary.unlink(missing_ok=True)
+                os.unlink(temporary)
             except OSError:
                 pass  # Failure must not turn a partial publish into success.
 
@@ -299,10 +319,10 @@ class SnapshotService:
         sampled_at = datetime.now(timezone.utc).isoformat(timespec="microseconds")
         captured, details = {}, {}
         if "projection" in paths:
-            raw = _pixels(doc.pixelData(0, 0, width, height), width, height, 4)
-            captured["projection"] = raw
-            details["projection"] = {"source": "Document.pixelData", "source_layout": "RGBA8",
-                                     "source_sha256": _digest(raw), "pixel_layout": "RGBA8",
+            bgra = _pixels(doc.pixelData(0, 0, width, height), width, height, 4)
+            captured["projection"] = swap_rb(bgra, width, height)
+            details["projection"] = {"source": "Document.pixelData", "source_layout": "BGRA8",
+                                     "source_sha256": _digest(bgra), "pixel_layout": "RGBA8",
                                      "alpha": "straight; preserved", "color_profile": SUPPORTED_PROFILE}
         if "selection" in paths:
             if selection_mode == "full_canvas":
@@ -337,7 +357,7 @@ class SnapshotService:
         for kind, raw in captured.items():
             png = encode_png(raw, width, height, 4 if kind == "projection" else 1)
             details[kind].update(pixel_sha256=_digest(raw), pixel_bytes=len(raw),
-                                 path=str(paths[kind]), file_bytes=len(png), file_sha256=_digest(png))
+                                 path=paths[kind].decode("utf-8"), file_bytes=len(png), file_sha256=_digest(png))
             outputs.append((paths[kind], png))
         publish_pngs(outputs, overwrite)
         paired = len(captured) == 2

@@ -105,9 +105,9 @@ class Doc:
         self.w, self.h = width, height
         self.uid = str(uuid.uuid4())
         self.model, self.depth, self.profile = "RGBA", "U8", snapshot.SUPPORTED_PROFILE
-        # RGBA order (live-verified 2026-10, Krita 6.0.4): opaque blue,
-        # half-alpha green, transparent red, repeating.
-        self.pixels = bytes([0, 0, 255, 255, 0, 255, 0, 128, 255, 0, 0, 0]) * (width * height // 3)
+        # BGRA (live-verified 2026-10, Krita 6.0.4): opaque red, half-alpha
+        # green, transparent blue, repeating.
+        self.bgra = bytes([0, 0, 255, 255, 0, 255, 0, 128, 255, 0, 0, 0]) * (width * height // 3)
         self.mask = Selection(bytes([0, 128, 255, 1, 254, 0]))
         self.events = []
         self.on_pixels = None
@@ -129,7 +129,7 @@ class Doc:
         self.events.append(("projection", rect))
         if self.on_pixels:
             self.on_pixels()
-        return self.pixels
+        return self.bgra
 
     def selection(self):
         self.events.append("selection")
@@ -148,11 +148,16 @@ class App:
 
 
 class Codec(unittest.TestCase):
-    def test_pixeldata_bytes_pass_through_unchanged(self):
-        # Live-verified 2026-10: pixelData is native RGBA order; no B/R swap.
-        rgba = bytes([3, 2, 1, 255, 30, 20, 10, 128, 9, 8, 7, 0])
+    def test_swap_rb_bgra_to_rgba_exact(self):
+        # Live-verified 2026-10: pixelData is BGRA — an RGBA write rendered
+        # R/B-swapped on the Krita canvas; only asymmetric color samples
+        # (never black-and-white roundtrips) can expose the order.
+        bgra = bytes([3, 2, 1, 255, 30, 20, 10, 128, 9, 8, 7, 0])
+        expected = bytes([1, 2, 3, 255, 10, 20, 30, 128, 7, 8, 9, 0])
+        rgba = snapshot.swap_rb(bgra, 3, 1)
+        self.assertEqual(rgba, expected)
         decoded = decode_png(snapshot.encode_png(rgba, 3, 1, 4))
-        self.assertEqual(decoded[:4], (3, 1, 4, rgba))
+        self.assertEqual(decoded[:4], (3, 1, 4, expected))
         # Untagged RGBA: agent vision decoders misrender the sRGB chunk.
         self.assertNotIn(b"sRGB", decoded[4])
         self.assertNotIn(b"iCCP", decoded[4])
@@ -262,7 +267,7 @@ class Exports(unittest.TestCase):
     def test_1328_rectangle_feather_edges_and_half_alpha(self):
         doc = self.app.doc
         doc.w = doc.h = 1328
-        doc.pixels = bytes([19, 41, 227, 128]) * (1328 * 1328)
+        doc.bgra = bytes([19, 41, 227, 128]) * (1328 * 1328)
         mask = bytearray(1328 * 1328)
         for y in range(1326, 1328):
             mask[y * 1328 + 1325:(y + 1) * 1328] = bytes([1, 128, 255])
@@ -270,7 +275,7 @@ class Exports(unittest.TestCase):
         result = self.pair()
         self.assertEqual(result["selection"]["bounds"], {"x": 1325, "y": 1326, "width": 3, "height": 2})
         self.assertEqual(result["selection"]["native_bounds"], result["selection"]["bounds"])
-        self.assertEqual(decode_png(self.p.read_bytes())[:4], (1328, 1328, 4, bytes([19, 41, 227, 128]) * (1328 * 1328)))
+        self.assertEqual(decode_png(self.p.read_bytes())[:4], (1328, 1328, 4, bytes([227, 41, 19, 128]) * (1328 * 1328)))
         self.assertEqual(decode_png(self.m.read_bytes())[:4], (1328, 1328, 1, bytes(mask)))
 
     def test_native_outside_bounds_not_used_as_crop(self):
@@ -293,7 +298,7 @@ class Exports(unittest.TestCase):
     def test_format_profile_lengths_and_no_document_fail_before_publish(self):
         doc = self.app.doc
         for attr, bad in (("model", "CMYKA"), ("depth", "U16"), ("profile", "linear-sRGB.icc"),
-                          ("pixels", b"short")):
+                          ("bgra", b"short")):
             old = getattr(doc, attr)
             with self.subTest(attr=attr), patch.object(doc, attr, bad), self.assertRaises(snapshot.SnapshotError):
                 self.pair()
@@ -344,6 +349,17 @@ class Exports(unittest.TestCase):
         decode_png(self.p.read_bytes())
         decode_png(self.m.read_bytes())
 
+    def test_non_ascii_output_paths_roundtrip(self):
+        # 2026-10 live: Krita's embedded Python fails str paths holding
+        # non-ASCII bytes; exports must go through explicit UTF-8 bytes.
+        p = self.root / "投影.png"
+        m = self.root / "蒙版.png"
+        result = self.service.export(projection_path=str(p), selection_path=str(m))
+        self.assertTrue(p.exists() and m.exists())
+        self.assertEqual(result["projection"]["path"], str(p))
+        self.assertEqual(result["selection"]["path"], str(m))
+        decode_png(p.read_bytes())
+
     def test_encoder_failure_never_publishes_first_file(self):
         original = snapshot.encode_png
         def fail_mask(data, width, height, channels):
@@ -375,7 +391,7 @@ class Exports(unittest.TestCase):
     def test_second_publish_failure_reports_partial_without_success(self):
         original = snapshot.os.link
         def publish(src, dst):
-            if Path(dst) == self.m:
+            if Path(os.fsdecode(dst)) == self.m:
                 raise OSError("second publish failed")
             return original(src, dst)
         with patch.object(snapshot.os, "link", side_effect=publish), self.assertRaises(snapshot.SnapshotError) as exc:
@@ -388,7 +404,7 @@ class Exports(unittest.TestCase):
     def test_no_clobber_publication_race_retains_competing_file(self):
         original = snapshot.os.link
         def race(src, dst):
-            Path(dst).write_bytes(b"competing file")
+            Path(os.fsdecode(dst)).write_bytes(b"competing file")
             return original(src, dst)
         with patch.object(snapshot.os, "link", side_effect=race), self.assertRaises(snapshot.SnapshotError):
             self.pair()
@@ -400,7 +416,7 @@ class Exports(unittest.TestCase):
         self.m.write_bytes(b"old m")
         original = snapshot.os.replace
         def publish(src, dst):
-            if Path(dst) == self.m:
+            if Path(os.fsdecode(dst)) == self.m:
                 raise OSError("second overwrite failed")
             return original(src, dst)
         with patch.object(snapshot.os, "replace", side_effect=publish), self.assertRaisesRegex(snapshot.SnapshotError, "published_paths"):

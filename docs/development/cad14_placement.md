@@ -35,7 +35,7 @@
 
 在 Qt 前先读取 33 字节 PNG 签名/IHDR，校验 CRC、合法格式和源尺寸，并计算最终计划/工作预算；之后才读取有界完整文件。只支持**非交错、静态、至多 8bit 标准 PNG**：灰度/索引可 1/2/4/8bit，RGB/灰度+Alpha/RGBA 为 8bit。16bit、Adam7、APNG、非 PNG、未知关键 chunk、坏 CRC、越界/截断 chunk、重复/乱序必要 chunk、IEND 后尾随数据均拒绝，不回退到其他 Qt 格式插件。像素压缩流由 Qt 验证，预检不是完整 PNG 解码器；不合法的有界 IDAT 仍可能到 Qt 后失败。
 
-保留像素必要的 PLTE/tRNS 及固定长度 sRGB/gAMA/cHRM/pHYs；剥离其余 ancillary 元数据（包括文本、压缩文本、ICC）后才交给 Qt，避免解压元数据炸弹；ComfyUI 文本元数据的存在本身不导致失败，但不会导入到图层，也不承诺保留嵌入 ICC 配置。无新增颜色空间转换/BGRA 交换。所有 chunk 先有界扫描/CRC，再解码内存中的已检查 PNG 快照（`QImage.fromData(..., "PNG")`），**不再次按路径打开文件**。读取前后比较 fd 的设备/inode/大小/mtime/ctime，核对快照头和读出大小，尽力发现读取中修改；没有文件锁或安全来源证明，不能保证对并发改写的原子快照语义。修改后的路径不影响已取得快照的预算。
+保留像素必要的 PLTE/tRNS 及固定长度 sRGB/gAMA/cHRM/pHYs；剥离其余 ancillary 元数据（包括文本、压缩文本、ICC）后才交给 Qt，避免解压元数据炸弹；ComfyUI 文本元数据的存在本身不导致失败，但不会导入到图层，也不承诺保留嵌入 ICC 配置。placement 本身无颜色空间转换/BGRA 交换；通道适配在调用方 `ops.layer_add` 完成——写 `setPixelData` 前一次 RGBA→BGRA 交换（Krita 原生字节序，2026-10 实机画布对照确认；响应 `mapping.pixel_layout = "BGRA8"`），`/layer/png` 读回时同样交换回 RGBA。`prepare_png` 以显式 UTF-8 字节路径打开文件：AppImage 内置 Python 的文件系统编码可能非 UTF-8，str 路径含非 ASCII 字节实测 ENOENT（2026-10）。所有 chunk 先有界扫描/CRC，再解码内存中的已检查 PNG 快照（`QImage.fromData(..., "PNG")`），**不再次按路径打开文件**。读取前后比较 fd 的设备/inode/大小/mtime/ctime，核对快照头和读出大小，尽力发现读取中修改；没有文件锁或安全来源证明，不能保证对并发改写的原子快照语义。修改后的路径不影响已取得快照的预算。
 
 缩小时直接从 QImage 的 strided 缓冲采样，不先整幅 `bytes` 复制/去 padding 再缩小；不缩放的连续缓冲最多一次不可变打包，现成精确 bytes 可原样复用。QImage 保活到采样完成。转换后、指针取尺寸前再次核对解码字节预算，输出分配/打包前与采样每行检查时间。
 

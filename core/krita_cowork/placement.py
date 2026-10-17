@@ -213,6 +213,14 @@ def _png_snapshot(encoded, budget):
     raise PlacementError("PNG 缺少 IEND")
 
 
+def _fs_bytes(path):
+    """Explicit UTF-8 bytes for OS calls: Krita's embedded Python may run with
+    a non-UTF-8 filesystem encoding (live-verified 2026-10: str paths with any
+    non-ASCII byte fail with ENOENT even when the file exists). Bytes paths
+    bypass the codec entirely."""
+    return path.encode("utf-8") if isinstance(path, str) else path
+
+
 def prepare_png(path, canvas_width, canvas_height, mode=None, offset_x=0,
                 offset_y=0, fit_canvas=None, *, budget=None):
     """Read one bounded regular-file snapshot; no path-based Qt second read."""
@@ -222,7 +230,7 @@ def prepare_png(path, canvas_width, canvas_height, mode=None, offset_x=0,
         raise PlacementError("PNG 路径含空字符")
     try:
         # O_NONBLOCK avoids waiting on FIFOs; fstat rejects all nonregular files.
-        fd = os.open(path, os.O_RDONLY | os.O_NONBLOCK)
+        fd = os.open(_fs_bytes(path), os.O_RDONLY | os.O_NONBLOCK)
         with os.fdopen(fd, "rb") as stream:
             before = os.fstat(stream.fileno())
             if not stat.S_ISREG(before.st_mode) or not 33 <= before.st_size <= MAX_PNG_BYTES:
@@ -242,7 +250,7 @@ def prepare_png(path, canvas_width, canvas_height, mode=None, offset_x=0,
         budget.check("PNG 文件读取后")
         return _png_snapshot(encoded, budget), mapping
     except OSError as exc:
-        raise PlacementError("PNG 读取失败: {0}".format(exc)) from exc
+        raise PlacementError("PNG 读取失败: {0}: {1}".format(path, exc.strerror or exc)) from exc
 
 
 def packed_rgba(raw, width, height, bytes_per_line, *, budget=None):
