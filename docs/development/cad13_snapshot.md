@@ -58,7 +58,7 @@ python3 core/cwb.py snapshot /tmp/projection.png /tmp/selection.png --overwrite 
 
 1. 只接受根节点 `RGBA/U8`，并明确收窄到 `Document.colorProfile() == sRGB-elle-V2-srgbtrc.icc`。CMYK、U16/F16 等和其他 ICC（包括线性 sRGB / 广色域）均拒绝，不静默转换或丢弃色彩解释。后续扩大白名单需要独立数值证据。
 2. 投影调用 `Document.pixelData(0, 0, width, height)`，不读取任何节点的 `bounds()` / `pixelData()`，不复用旧的 `/layer/png`。要求长度严格为 `width*height*4`。
-3. 按 Krita RGBA/U8 API 预期的 **BGRA 字节序**交换 B/R，PNG 为 8-bit straight RGBA（color type 6），保留半透明 Alpha 和透明像素的 RGB；不自行预乘/反预乘。PNG 带 sRGB chunk。真实 Krita 是否按该约定返回，仍须实机验证，离线数据不能证明。
+3. 按 Krita RGBA/U8 API 预期的 **BGRA 字节序**交换 B/R，PNG 为 8-bit straight RGBA（color type 6），保留半透明 Alpha 和透明像素的 RGB；不自行预乘/反预乘。PNG **不带 sRGB/gAMA/iCCP 色彩元数据 chunk**：像素已在上游收窄为 sRGB profile，未标记 PNG 按惯例即按 sRGB 解读；且实测部分智能体视觉解码管线遇到显式 sRGB chunk 会把整帧误渲染为黑帧（2026-10 离线对照确认），故不再写入。真实 Krita 是否按该约定返回，仍须实机验证，离线数据不能证明。
 4. 选区只用 `Selection.pixelData(0, 0, width, height)`，严格检查长度 `width*height`，不通过 QColor、QImage RGBA 或 bounds 重构蒙版；0、128、255 和所有羽化值原样保存。
 5. 蒙版 PNG 是 8-bit **单通道灰度**（color type 0），**没有 Alpha，也不含 tRNS/gamma/色彩配置**。`M=0` 未选，`M=255` 全选，`M=128` 为 128/255 覆盖，不反转、不阈值化、不做 gamma。渲染器将灰度图显示为不透明属于预期。未来消费者必须按灰度通道读取；不能直接假定 ComfyUI `LoadImage.MASK`（通常由 Alpha 得到）就是这份蒙版。
 6. 采样顺序：`waitForDone()` → `refreshProjection()` → `waitForDone()` → 文档/选区读取。仅刷新投影缓存，没有文档/图层/选区 setter、合并、保存、undo 操作。刷新是否充分、是否保持实际 modified/undo 状态，必须用真实 Krita 验证，不能仅凭本测试替身计数声称作品未变。

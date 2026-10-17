@@ -154,7 +154,10 @@ class Codec(unittest.TestCase):
         self.assertEqual(rgba, expected)
         decoded = decode_png(snapshot.encode_png(rgba, 3, 1, 4))
         self.assertEqual(decoded[:4], (3, 1, 4, expected))
-        self.assertIn(b"sRGB", decoded[4])
+        # Untagged RGBA: agent vision decoders misrender the sRGB chunk.
+        self.assertNotIn(b"sRGB", decoded[4])
+        self.assertNotIn(b"iCCP", decoded[4])
+        self.assertNotIn(b"gAMA", decoded[4])
 
     def test_gray_is_coverage_not_alpha_and_preserves_all_256_values(self):
         gray = bytes(range(256))

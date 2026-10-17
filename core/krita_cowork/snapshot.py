@@ -71,9 +71,11 @@ def encode_png(data, width, height, channels):
     scanlines = b"".join(b"\0" + raw[y * stride:(y + 1) * stride]
                          for y in range(height))
     ihdr = struct.pack(">IIBBBBB", width, height, 8, 6 if channels == 4 else 0, 0, 0, 0)
-    # Mask is coverage, NOT color: no gamma/profile chunk on Gray8.
-    color = _chunk(b"sRGB", b"\0") if channels == 4 else b""
-    return (b"\x89PNG\r\n\x1a\n" + _chunk(b"IHDR", ihdr) + color +
+    # No sRGB/gAMA/iCCP chunk on either variant: samples are gated to sRGB
+    # (SUPPORTED_PROFILE) and untagged PNG reads as sRGB by convention; the
+    # explicit sRGB chunk renders as a black frame in some agent vision
+    # decoders. Gray8 is coverage, NOT color, and must stay untagged anyway.
+    return (b"\x89PNG\r\n\x1a\n" + _chunk(b"IHDR", ihdr) +
             _chunk(b"IDAT", zlib.compress(scanlines, 6)) + _chunk(b"IEND", b""))
 
 
