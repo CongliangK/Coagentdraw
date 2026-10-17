@@ -1,8 +1,9 @@
-"""CAD-21: 确定性阶段组；独立 sidecar，不修改项目状态或 Krita 插件。
+"""CAD-21/49: 确定性阶段组；独立 sidecar 与版本化受保护追加协议。
 
 组名中的随机 [cwb:UUID] 是可见的持久身份标记，不是 #13 文档 token。
 仅在同一 pid/root 的已知会话使用节点 ID；否则必须重新解析随机标记。
 HTTP 创建和 sidecar 写入不是原子事务；未确认请求始终阻止自动重试。
+旧插件不支持 /write/v1 时停止，绝不回落无保护的 /layer 路由。
 """
 from contextlib import contextmanager
 from datetime import datetime, timezone
@@ -29,6 +30,9 @@ PRESETS = {
     7: ("交付", ("主图", "辅助视图", "Callout")),
     8: ("插画", ("构图", "灰阶", "色稿", "精修")),
 }
+WRITE_PROTOCOL = "cwb-guarded-write-v1"
+MAX_SOURCE_BYTES = 32 * 1024 * 1024
+
 MARKER = re.compile(r"\[cwb:([0-9a-f-]{36})\]")
 
 
@@ -190,6 +194,32 @@ class Store:
                 os.unlink(name)
 
 
+def source_digest(path):
+    """Bounded regular-file intent digest; server validates its own same-byte snapshot."""
+    flags = os.O_RDONLY | getattr(os, "O_NONBLOCK", 0)
+    with os.fdopen(os.open(path, flags), "rb") as stream:
+        before = os.fstat(stream.fileno())
+        if not stat.S_ISREG(before.st_mode) or not 33 <= before.st_size <= MAX_SOURCE_BYTES:
+            raise StageError("PNG 必须是 33 字节..32MiB 的普通文件")
+        if stream.read(8) != b"\x89PNG\r\n\x1a\n":
+            raise StageError("必须显式提供 PNG 路径")
+        stream.seek(0)
+        digest, total = hashlib.sha256(), 0
+        while True:
+            block = stream.read(min(1024 * 1024, MAX_SOURCE_BYTES + 1 - total))
+            if not block:
+                break
+            total += len(block)
+            if total > MAX_SOURCE_BYTES:
+                raise StageError("PNG 来源大小超限")
+            digest.update(block)
+        after = os.fstat(stream.fileno())
+        identity = lambda st: (st.st_dev, st.st_ino, st.st_size, st.st_mtime_ns, st.st_ctime_ns)
+        if identity(before) != identity(after) or total != before.st_size:
+            raise StageError("PNG 在读取期间改变")
+        return digest.hexdigest()
+
+
 def snapshot(request, document):
     """仅消费现有只读契约；前后查询不构成跨 HTTP 请求的文档锁。"""
     def active():
@@ -204,7 +234,8 @@ def snapshot(request, document):
 
     info = active()
     pid = request("/ping")["pid"]
-    tree = request("/layers")
+    guarded = request("/write/v1/target")
+    tree = guarded.get("tree", {})
     if active() != info or tree.get("document") != info["name"]:
         raise StageError("读取期间活动文档发生变化；停止")
     roots = tree.get("layers", [])
@@ -221,8 +252,21 @@ def snapshot(request, document):
             walk(child, node_id)
 
     walk(roots[0], None)
-    return {"session": {"pid": pid, "root": roots[0]["id"]},
-            "nodes": nodes, "parents": parents, "tree": tree}
+    target = guarded.get("expected_target", {})
+    if (guarded.get("protocol") != WRITE_PROTOCOL or target.get("protocol") != WRITE_PROTOCOL or
+            target.get("document") != document or target.get("root") != roots[0]["id"] or
+            target.get("width") != info["width"] or target.get("height") != info["height"] or
+            guarded.get("pid") != pid):
+        raise StageError("受保护目标快照不符或旧服务不支持；不回落旧写入接口")
+    for field in ("service_id", "document_handle"):
+        try:
+            if str(uuid.UUID(target[field])) != target[field]:
+                raise ValueError()
+        except (KeyError, TypeError, ValueError, AttributeError):
+            raise StageError("受保护文档身份合同缺失") from None
+    return {"session": {"pid": pid, "root": roots[0]["id"],
+                         "service_id": target["service_id"], "document_handle": target["document_handle"]},
+            "nodes": nodes, "parents": parents, "tree": tree, "expected_target": target}
 
 
 def resolve(data, snap):
@@ -284,8 +328,10 @@ def execute(number, document, state_path, request, diagnostic=None, name="诊断
         if number != 6:
             raise StageError("诊断 PNG 仅导入第六阶段")
         source = Path(diagnostic).expanduser().resolve()
-        if not source.is_file() or source.read_bytes()[:8] != b"\x89PNG\r\n\x1a\n":
-            raise StageError("必须显式提供已存在的 PNG 路径；不生成诊断图")
+        try:
+            digest = source_digest(source)
+        except OSError as exc:
+            raise StageError("必须显式提供已存在的 PNG 路径；不生成诊断图") from exc
         if not isinstance(name, str) or not name.strip() or "[cwb:" in name:
             raise StageError("无效导入图层名")
     store = Store(state_path)
@@ -327,8 +373,8 @@ def execute(number, document, state_path, request, diagnostic=None, name="诊断
                 raise StageError("缺少已登记诊断组；请先 stage setup 6")
             payload = {"png_path": str(source), "name": name, "parent_id": ids[target]}
             operation = {"operation_id": str(uuid.uuid4()), "kind": "diagnostic", "request": payload,
-                         "source_sha256": hashlib.sha256(source.read_bytes()).hexdigest()}
-            imported, _ = perform(store, data, request, document, snap, operation, "/layer/add", "paintlayer")
+                         "source_sha256": digest}
+            imported, _ = perform(store, data, request, document, snap, operation, "/write/v1/add", "paintlayer")
         else:
             for key, label, parent in wanted:
                 if key in ids:
@@ -338,7 +384,7 @@ def execute(number, document, state_path, request, diagnostic=None, name="诊断
                 data["groups"][key] = {"token": token, "id": None, "status": "pending", "name": group_name}
                 payload = {"name": group_name, "parent_id": ids[parent] if parent else None}
                 operation = {"operation_id": str(uuid.uuid4()), "kind": "group", "key": key, "request": payload}
-                result, snap = perform(store, data, request, document, snap, operation, "/layer/group", "grouplayer")
+                result, snap = perform(store, data, request, document, snap, operation, "/write/v1/group", "grouplayer")
                 ids[key] = result["id"]
                 created.append(key)
         return {"stage": number, "workflow_id": selected_workflow, "document_role": selected_role,
@@ -347,7 +393,8 @@ def execute(number, document, state_path, request, diagnostic=None, name="诊断
 
 
 def perform(store, data, request, document, before, operation, endpoint, expected_type):
-    # 再检查活动文档/会话；现有接口没有原子的 expected-document 条件。
+    # Client preflight improves diagnostics; only the versioned server callback
+    # authorizes a write. A snapshot followed by an unguarded POST is forbidden.
     current = snapshot(request, document)
     if current["session"] != before["session"]:
         raise StageError("写入前会话改变；停止")
@@ -355,13 +402,26 @@ def perform(store, data, request, document, before, operation, endpoint, expecte
     existing = {**data, "groups": {k: g for k, g in data["groups"].items() if g["status"] == "verified"}}
     if resolve(existing, current) != {k: g["id"] for k, g in existing["groups"].items()}:
         raise StageError("写入前组 ID 改变；停止并重新解析")
+    operation["request"].update(operation_id=operation["operation_id"],
+                                expected_target=current["expected_target"],
+                                expected_bindings=[{"id": g["id"], "token": g["token"]}
+                                                   for g in existing["groups"].values()])
+    if operation["kind"] == "diagnostic":
+        operation["request"]["source_sha256"] = operation["source_sha256"]
     data["pending"] = operation
     event(data, "request_prepared", operation_id=operation["operation_id"],
           operation_kind=operation["kind"], request=operation["request"],
           key=operation.get("key"), source_sha256=operation.get("source_sha256"))
     store.save(data)  # 必须在首次写请求之前可追溯。
     try:
-        response = request(endpoint, operation["request"])
+        receipt = request(endpoint, operation["request"])
+        operation["receipt"] = receipt
+        if (receipt.get("protocol") != WRITE_PROTOCOL or
+                receipt.get("operation_id") != operation["operation_id"] or
+                receipt.get("service_id") != current["expected_target"]["service_id"] or
+                receipt.get("status") != "succeeded" or not isinstance(receipt.get("result"), dict)):
+            raise StageError("服务端写入未确认；查询收据，不自动重试: " + str(receipt.get("status")))
+        response = receipt["result"]
         operation["response"] = response
         event(data, "response_received", operation_id=operation["operation_id"], response=response)
         store.save(data)
@@ -386,6 +446,13 @@ def perform(store, data, request, document, before, operation, endpoint, expecte
         # 不回滚、不删除；保留发送前 payload、响应(若有)、故障和最后可读树。
         data["pending"] = operation
         event(data, "unconfirmed", operation_id=operation["operation_id"], error=str(exc))
+        try:
+            receipt = request("/write/v1/receipt", {"operation_id": operation["operation_id"],
+                                                     "service_id": current["expected_target"]["service_id"]})
+            operation["last_receipt"] = receipt
+            event(data, "receipt_observed", operation_id=operation["operation_id"], receipt=receipt)
+        except (Exception, SystemExit) as receipt_exc:
+            event(data, "receipt_query_failed", error=str(receipt_exc))
         try:
             observed = snapshot(request, document)
             event(data, "failure_readback", tree=observed["tree"], session=observed["session"])

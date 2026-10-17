@@ -10,6 +10,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+import uuid
 from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -31,6 +32,9 @@ class Fake:
         self.fail_at = None
         self.mode = "normal"
         self.read_fail = False
+        self.service_id = str(uuid.uuid4())
+        self.document_handle = str(uuid.uuid4())
+        self.receipts = {}
 
     def nodes(self):
         result = {}
@@ -50,6 +54,7 @@ class Fake:
     def reopen(self):
         # 明确模拟所有会话 ID 失效；不冒充真实 Krita 重开证据。
         self.pid += 1
+        self.document_handle = str(uuid.uuid4())
         for node in list(self.nodes().values()):
             node["id"] += "-reopen"
 
@@ -60,18 +65,29 @@ class Fake:
                                     "width": 100, "height": 100, "active": True}]}
         if path == "/ping":
             return {"pid": self.pid, "ok": True}
+        if path == "/write/v1/receipt":
+            return copy.deepcopy(self.receipts.get(payload["operation_id"],
+                {"protocol": stage.WRITE_PROTOCOL, "status": "unknown"}))
+        if path == "/write/v1/target":
+            if self.read_fail:
+                raise OSError("mock readback unavailable")
+            return {"protocol": stage.WRITE_PROTOCOL, "pid": self.pid,
+                    "expected_target": {"protocol": stage.WRITE_PROTOCOL,
+                        "service_id": self.service_id, "document_handle": self.document_handle,
+                        "document": self.document, "root": self.root["id"], "width": 100, "height": 100},
+                    "tree": {"document": "测试", "layers": [copy.deepcopy(self.root)]}}
         if path == "/layers":
             if self.read_fail:
                 raise OSError("mock readback unavailable")
             return {"document": "测试", "layers": [copy.deepcopy(self.root)]}
-        if path in ("/layer/group", "/layer/add"):
+        if path in ("/write/v1/group", "/write/v1/add"):
             self.posts += 1
             failing = self.posts == self.fail_at
             if failing and self.mode == "before":
                 raise OSError("mock no response; may still execute")
             parent = payload.get("parent_id")
             node = self.add(payload["name"], parent,
-                            "grouplayer" if path == "/layer/group" else "paintlayer")
+                            "grouplayer" if path == "/write/v1/group" else "paintlayer")
             response = {"id": node["id"], "name": node["name"], "parent_id": parent or self.root["id"]}
             if failing:
                 if self.mode == "after":
@@ -87,7 +103,10 @@ class Fake:
                     raise SystemExit("HTTP 400: mock partial create")
                 if self.mode == "interrupt":
                     raise KeyboardInterrupt()
-            return response
+            receipt = {"protocol": stage.WRITE_PROTOCOL, "operation_id": payload["operation_id"],
+                       "service_id": self.service_id, "status": "succeeded", "result": response}
+            self.receipts[payload["operation_id"]] = receipt
+            return receipt
         raise AssertionError(path)
 
 
@@ -169,7 +188,7 @@ class StageTests(unittest.TestCase):
         original = self.fake.request
         reads_after_root = [0]
         def interrupted(path, payload=None):
-            if path == "/layers" and self.fake.posts == 1:
+            if path == "/write/v1/target" and self.fake.posts == 1:
                 reads_after_root[0] += 1
                 if reads_after_root[0] == 2:
                     raise OSError("read failed before second POST")
@@ -293,7 +312,7 @@ class StageTests(unittest.TestCase):
         self.fake.document = str(self.document)
         def after(path, payload=None):
             result = original(path, payload)
-            if path == "/layer/group":
+            if path == "/write/v1/group":
                 self.fake.document = str(other)
             return result
         with self.assertRaisesRegex(stage.StageError, "未确认"):
@@ -377,8 +396,12 @@ class StageTests(unittest.TestCase):
         count = self.fake.posts
         self.setup_stage(6, diagnostic=png, name="#18 已有诊断")
         self.assertEqual(self.fake.posts, count + 1)
-        endpoint, payload = [call for call in self.fake.calls if call[0] == "/layer/add"][-1]
-        self.assertEqual(payload, {"png_path": str(png), "name": "#18 已有诊断", "parent_id": target["id"]})
+        endpoint, payload = [call for call in self.fake.calls if call[0] == "/write/v1/add"][-1]
+        self.assertEqual({k: payload[k] for k in ("png_path", "name", "parent_id")},
+                         {"png_path": str(png), "name": "#18 已有诊断", "parent_id": target["id"]})
+        self.assertEqual(payload["expected_target"]["document"], str(self.document))
+        self.assertEqual(payload["source_sha256"], stage.source_digest(png))
+        self.assertEqual(str(uuid.UUID(payload["operation_id"])), payload["operation_id"])
         self.assertEqual(target["children"][0]["type"], "paintlayer")
         self.assertTrue(any(e.get("source_sha256") for e in self.data()["events"]))
         # 导入是显式追加，不声称幂等导入、像素写入验证或保存/重开通过。
