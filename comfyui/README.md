@@ -1,6 +1,6 @@
 # ComfyUI 工作流
 
-> **PR-01 目标流程/待迁移提示**：目标流程服务 Krita 线稿/平涂与安全候选循环，程序链路尚待 PR-04 联调。下列 t2i/2K 仅声明文生图，edit/w4a8 仅声明单/双参考图编辑，不因此具有原生 Mask 或专用 Lineart/Depth/Pose 条件。新路径须记录真实节点、输入角色、蒙版极性与对照运行证据；受控区域合成不同于模型原生 Mask。输出先候选，不以参考图输入或 prompt 描述冒称结构控制。真实模型效果本次未验证，不自动下载/换栈。 见[现行总纲](<../design/Krita中枢创作流程_正式执行规范.md>)。此提示不增加现有命令、参数或运行保证。
+> **PR-01 目标流程/待迁移提示**：目标流程服务 Krita 线稿/平涂与安全候选循环。下列 t2i/2K 仅声明文生图，edit/w4a8 仅声明单/双参考图编辑；localedit 是 **latent 噪声掩码 + 裁剪重绘 + 像素贴回** 的受控区域合成，不是模型原生 Mask，也不具备专用 Lineart/Depth/Pose 条件。新路径须记录真实节点、输入角色、蒙版极性与对照运行证据；输出先候选，不以参考图输入或 prompt 描述冒称结构控制。localedit 已有 B 实机对照证据（见[掩码规范](#局部改图掩码规范2026-10-实测)与 [CAD-R02](<../design/调研报告/CAD-R02_局部精确改图与剪影调整实测.md>)）；真实模型效果以实机为准，不自动下载/换栈。 见[现行总纲](<../design/Krita中枢创作流程_正式执行规范.md>)。此提示不增加现有命令、参数或运行保证。
 
 [cwb.py](<../core/cwb.py>) 通过 ComfyUI `/prompt` API 提交的 API 格式工作流（Qwen-Image-2.1）。
 
@@ -10,6 +10,7 @@
 | [wf_qwen21_edit_api.json](wf_qwen21_edit_api.json) | 图像编辑（单图/双图） | `cwb comfy-edit` 默认加载 |
 | [wf_t2i_2k_api.json](wf_t2i_2k_api.json) | 文生图（2K 变体） | 备用 |
 | [wf_edit_w4a8_api.json](wf_edit_w4a8_api.json) | 图像编辑（w4a8 量化变体） | 备用 |
+| [wf_qwen21_localedit_api.json](wf_qwen21_localedit_api.json) | 局部精确改图：底图+掩码双输入，掩码外像素贴回 | 必须提供 `--image2`（掩码） |
 
 ## 依赖模型
 
@@ -19,9 +20,28 @@
 - `qwen3vl_8b_int8_convrot.safetensors`（CLIP，int8；w4a8 变体使用 `qwen3vl_8b_w4a8.safetensors`）
 - `qwen_image_2.1_vae_bf16.safetensors`（VAE）
 
+### 自定义节点（localedit 必需）
+
+- [ComfyUI-Inpaint-CropAndStitch](https://github.com/lquesada/ComfyUI-Inpaint-CropAndStitch)（`InpaintCropImproved`/`InpaintStitchImproved`；本机已装于 `custom_nodes/`，依赖 cv2/numpy）
+- 可选未实测：`viggle_turbo.py`（Qwen-Image-2.1 六步 turbo LoRA 运行时挂载节点）及其 LoRA 文件；LoRA 未下载前不可用，下载后需另行对照验收，不入库声称效果
+
 ## 路径约定
 
 `cwb.py` 默认从仓库内本目录加载工作流；可用环境变量 `CWB_WF_DIR` 指向自定义工作流目录（缓存 `cowork_cache/` 也会创建在该目录下）。
+
+## 局部改图掩码规范（2026-10 实测）
+
+localedit 的精度来自机制保证而非提示词：底图经 VAEEncode 进入 latent，`SetLatentNoiseMask` 只在掩码区采样，重绘结果由 `InpaintStitchImproved` 在像素空间贴回。实测（Qwen-Image-2.1 int8，1024² 底图，768² 裁剪窗，掩码外扩 50px、羽化 32px，见 [CAD-R02](<../design/调研报告/CAD-R02_局部精确改图与剪影调整实测.md>)）：
+
+- 掩码外（扣除羽化带）与底图 **逐像素一致（差值全零）**；羽化带内允许混合。对照：纯参考图编辑圈外 12.3% 像素大变；全图 latent 掩码圈外仍有 VAE 往返噪声（均值约 1/255）。
+- 提示词只能影响掩码内；"圈外不变/无渐变"之类字句对模型无效，不要依赖。
+- 掩码设计规则（违反即失败，实测记录见 cache）：
+  1. 部件调整：掩码框住目标部件全形 + 余量，边界落在部件间自然空隙，不横切实体；
+  2. 大形/比例调整：保留一个锚点部件（通常是头/帽），掩码覆盖其余整体重做，提示词描述新大形而非"局部微调"；
+  3. 提示词不得含几何矛盾（如"大衣加长到膝下"且"腿部不变"）；
+  4. 剪影用途掩码内可能有淡灰残留，必要时在 Krita 侧阈值化后处理。
+- 掩码极性：白 = 重绘区，黑 = 保留区；掩码经 `ImageToMask`（红通道）输入，同时作为 `<image2>` 参考进入文本编码器（模型"看得见"标注区域）。
+- 边界渐变是模型在掩码边缘的固有行为，掩码切过服装时会出现；缓解靠掩码沿结构边界画或覆盖完整部件，机制本身不解决。
 
 ## CLI 参数与契约（CAD-10）
 
@@ -33,7 +53,7 @@ python3 core/cwb.py comfy-replay comfyui/cowork_cache/<UUID>/run.json
 ```
 
 - `--help`、参数解析及契约校验不创建缓存目录，不访问网络。缓存仅在有效生成任务开始时创建。
-- `--wf` 为 `CWB_WF_DIR` 内的 JSON 路径，禁止跳出目录（包括符号链接）。需同时提供同名 `*.contract.json`。四份已入库工作流均附契约；原工作流文件没有改动。
+- `--wf` 为 `CWB_WF_DIR` 内的 JSON 路径，禁止跳出目录（包括符号链接）。需同时提供同名 `*.contract.json`。五份已入库工作流均附契约；原工作流文件没有改动。
 - 契约版本为 1，包含 `mode`（t2i/edit）、`parameters`、`outputs`。每个参数显式声明 `node`、`input`、`class_type`，不推断任意节点；目标节点、类型、字段、默认值不匹配时立即失败。参数与图像映射的全部目标不得重叠，所有 LoadImage 节点均须由编辑契约映射。单图模式仅移除 collection 中的 image_2 引用；若图中任何其他输入（包括嵌套输入和非下载目标分支）仍引用第二个加载节点，则在文件读取、网络及缓存创建前明确拒绝，要求提供 --image2 或修改工作流。第一图的其他分支与双图的多输出仍受支持。编辑图还声明 `images.image1/image2/collection`。
 - `--seed` 为 0 至 2^64−1 的整数；`--steps` 为正整数；`--cfg` 为非负有限数；`--denoise` 为 0 至 1；T2I 的 `--w/--h` 为正整数。实际模型/节点的额外约束由服务端校验，离线校验不代表模型支持。
 - 未指定的参数保留工作流 JSON 中的值。既有默认 T2I 保持 1328×1328、seed=42、steps=25、cfg=1、denoise=1；显式选择 2K 变体时保留其 2048×2048。不支持的参数明确报错。
