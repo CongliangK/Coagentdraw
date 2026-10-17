@@ -109,6 +109,8 @@ python3 core/cwb.py save 作品.kra
 
 有限离线风格配置：`python3 core/cwb.py style --help`。版本化 `style_tokens` **仅存独立 sidecar，不在项目主状态**；支持参考图摘要/锁定历史、显式提示片段导出和复用 #23 的同尺度人工标杆比较。契约与未完成门槛见 [CAD-26 风格工具](<docs/development/cad26_style.md>)；不自动改生成请求，不保证跨图一致性，未运行两个角色生成。
 
+阶段二事实核对支线：`python3 core/cwb_research.py --help`。独立标准库脚本提供有限来源计划、已有页级/对象 JSON 条目的本地关键词检索、精确定位及人工采用证据汇总，见[事实检索契约](docs/development/factual_research.md)。不自动联网、解析 PDF 或核验来源真伪；只辅助[现行联想调研工作表](<design/执行手册/02_联想与前期调研.md>)中的具体事实问题，不限制整个灵感池或代替 Krita 想象板。
+
 环境变量：
 
 - `CWB_WF_DIR`：ComfyUI 工作流目录，默认为仓库内 `comfyui/`。使用前请先核实依赖模型已在 ComfyUI 中就位（见 [comfyui/README.md](comfyui/README.md)）。
