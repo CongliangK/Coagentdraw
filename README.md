@@ -120,4 +120,3 @@ python3 core/cwb.py save 作品.kra
 - root 层无 `x()/y()`,统一用 `bounds()`;无 `setDirty`
 - PyQt6 `constBits()` 是 voidptr,需 `asarray(bpl*h)`
 - `Document.pixelData`/`Node.pixelData` 实测返回 RGBA 字节序(2026-10, 6.0.4 AppImage);投影导出不做 B/R 交换(早期 BGRA 假设曾使投影红蓝互换)
-- `Document.pixelData`/`Node.pixelData` 实测返回 RGBA 字节序(2026-10, 6.0.4 AppImage);投影导出不做 B/R 交换(早期 BGRA 假设曾使投影红蓝互换)

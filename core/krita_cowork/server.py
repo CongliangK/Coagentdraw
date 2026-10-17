@@ -24,7 +24,7 @@ POST_ROUTES = {
                            ("selection_mode", "overwrite", "expected_document_token")),
     "/doc/snapshot": (ops.doc_snapshot, ("projection_path", "selection_path"),
                       ("selection_mode", "overwrite", "expected_document_token")),
-    "/layer/png": (ops.layer_png, ("id", "path"), ()),
+    "/layer/png": (ops.layer_png, ("id", "path"), ("underlay",)),
     "/layer/group": (ops.layer_group, ("name",), ("parent_id", "above")),
     "/layer/add": (ops.layer_add, ("png_path", "name"),
                    ("above", "offset_x", "offset_y", "parent_id", "mode", "fit_canvas")),

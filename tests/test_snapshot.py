@@ -158,6 +158,40 @@ class Codec(unittest.TestCase):
         self.assertNotIn(b"iCCP", decoded[4])
         self.assertNotIn(b"gAMA", decoded[4])
 
+    def test_magenta_flatten_renders_transparency_explicitly(self):
+        # a=0 → pure magenta regardless of stale RGB; a=255 → unchanged; all output opaque.
+        rgba = bytes([9, 9, 9, 0, 10, 20, 30, 255, 20, 40, 60, 128])
+        flat, near = snapshot.flatten_over_magenta(rgba, 3, 1)
+        mr, mg, mb = snapshot.MAGENTA
+        self.assertEqual(flat[:4], bytes((mr, mg, mb, 255)))
+        self.assertEqual(flat[4:8], bytes((10, 20, 30, 255)))
+        blended = bytes((v * 128 + c * (255 - 128) + 127) // 255
+                        for v, c in ((20, mr), (40, mg), (60, mb)))
+        self.assertEqual(flat[8:12], blended + b"\xff")
+        self.assertEqual(near, 0)
+
+    def test_magenta_flatten_counts_content_confusable_with_field(self):
+        rgba = bytes([255, 0, 255, 255, 191, 0, 255, 255,
+                      250, 70, 250, 255, 0, 0, 0, 255])
+        flat, near = snapshot.flatten_over_magenta(rgba, 4, 1)
+        self.assertEqual(near, 1)  # only the exact-magenta content; edge/bright/grey stay uncounted
+        self.assertTrue(all(flat[i + 3] == 255 for i in range(0, len(flat), 4)))
+
+    def test_alpha_summary_coverage_and_bbox(self):
+        rgba = bytearray(12 * 4)
+        for x in range(2, 5):
+            rgba[x * 4 + 3] = 255
+        summary = snapshot.alpha_summary(bytes(rgba), 12, 1)
+        self.assertEqual(summary, {"coverage_pixels": 3,
+                                   "bbox": {"x": 2, "y": 0, "width": 3, "height": 1}})
+        empty = snapshot.alpha_summary(bytes(4), 1, 1)
+        self.assertEqual(empty, {"coverage_pixels": 0, "bbox": None})
+
+    def test_magenta_flatten_rejects_bad_buffer(self):
+        for data in (4, True, "abcd", None, object(), b"short"):
+            with self.subTest(data=data), self.assertRaises(snapshot.SnapshotError):
+                snapshot.flatten_over_magenta(data, 1, 1)
+
     def test_gray_is_coverage_not_alpha_and_preserves_all_256_values(self):
         gray = bytes(range(256))
         decoded = decode_png(snapshot.encode_png(gray, 256, 1, 1))
@@ -172,6 +206,7 @@ class Codec(unittest.TestCase):
                                              (32769, 1, b"", 1)]:
             with self.subTest(width=width, channels=channels), self.assertRaises(snapshot.SnapshotError):
                 snapshot.encode_png(data, width, height, channels)
+
     def test_empty_edge_and_feather_bounds(self):
         self.assertIsNone(snapshot.mask_bounds(bytes(6), 3, 2))
         self.assertEqual(snapshot.mask_bounds(bytes([0, 0, 1, 0, 0, 0]), 3, 2),

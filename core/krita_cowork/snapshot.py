@@ -52,6 +52,56 @@ def _pixels(data, width, height, channels):
 # Live-verified 2026-10 (Krita 6.0.4 AppImage): Document.pixelData and
 # Node.pixelData both return native RGBA order. An earlier B/R swap here
 # traded red and blue in every projection export; it must not come back.
+MAGENTA = (255, 0, 255)
+
+
+def alpha_summary(data, width, height):
+    """Nonzero-alpha coverage and tight bbox, in bounds-local coordinates."""
+    raw = _pixels(data, width, height, 4)
+    alpha = raw[3::4]
+    return {"coverage_pixels": len(alpha) - alpha.count(0),
+            "bbox": mask_bounds(alpha, width, height)}
+
+
+_BLEND_LUTS = None
+
+
+def _blend_luts():
+    global _BLEND_LUTS
+    if _BLEND_LUTS is None:
+        _BLEND_LUTS = tuple(
+            bytes((v * a + c * (255 - a) + 127) // 255
+                  for a in range(256) for v in range(256))
+            for c in MAGENTA)
+    return _BLEND_LUTS
+
+
+def flatten_over_magenta(data, width, height):
+    """Straight-alpha RGBA over opaque magenta; agent vision has no reliable
+    alpha rendering, so transparency is drawn explicitly. Returns
+    (opaque_rgba, near_magenta_pixels): content pixels near magenta are
+    counted, not hidden — the caller reports the residual ambiguity."""
+    raw = _pixels(data, width, height, 4)
+    lut_r, lut_g, lut_b = _blend_luts()
+    mr, mg, mb = MAGENTA
+    out = bytearray(len(raw))
+    near = 0
+    for i in range(0, len(raw), 4):
+        a = raw[i + 3]
+        if a == 0:
+            out[i], out[i + 1], out[i + 2], out[i + 3] = mr, mg, mb, 255
+            continue
+        if a == 255:
+            r, g, b = raw[i], raw[i + 1], raw[i + 2]
+        else:
+            base = a << 8
+            r = lut_r[base | raw[i]]
+            g = lut_g[base | raw[i + 1]]
+            b = lut_b[base | raw[i + 2]]
+        out[i], out[i + 1], out[i + 2], out[i + 3] = r, g, b, 255
+        if r >= 192 and g <= 63 and b >= 192:
+            near += 1
+    return bytes(out), near
 
 
 def _chunk(kind, payload):

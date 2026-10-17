@@ -163,10 +163,14 @@ def layers():
     return {"document": doc.name(), "layers": [ser(doc.rootNode(), 0)]}
 
 
-def layer_png(layer_id, path):
-    """把图层像素导出为 PNG。"""
+def layer_png(layer_id, path, underlay="magenta"):
+    """图层像素导出 PNG。underlay=magenta(默认)把透明区渲染为不透明洋红底衬:
+    智能体视觉管线对 alpha 的合成行为不可靠(实测白/黑不定),透明语义必须画进像素。
+    响应附带 alpha 覆盖数与画布坐标紧致包围盒;与洋红难区分的内容像素一并报告。"""
     doc = _active_doc()
     _check_rgba8(doc)
+    if underlay not in ("magenta", "none"):
+        raise OpError("underlay 仅支持 magenta/none")
     node = _find_node(doc, layer_id)
     b = node.bounds()
     if b.width() <= 0 or b.height() <= 0:
@@ -178,6 +182,11 @@ def layer_png(layer_id, path):
                 len(data), b.width() * b.height() * 4
             )
         )
+    from .snapshot import alpha_summary, flatten_over_magenta
+    summary = alpha_summary(data, b.width(), b.height())
+    near = None
+    if underlay == "magenta":
+        data, near = flatten_over_magenta(data, b.width(), b.height())
     img = QImage(
         bytes(data), b.width(), b.height(), b.width() * 4,
         QImage.Format.Format_RGBA8888,
@@ -186,7 +195,14 @@ def layer_png(layer_id, path):
     os.makedirs(os.path.dirname(out_path) or ".", exist_ok=True)
     if not img.save(out_path, "PNG"):
         raise OpError("PNG 写入失败: {0}".format(out_path))
-    return {"path": out_path, "width": b.width(), "height": b.height()}
+    bbox = summary["bbox"]
+    if bbox is not None:
+        bbox = {"x": bbox["x"] + b.x(), "y": bbox["y"] + b.y(),
+                "width": bbox["width"], "height": bbox["height"]}
+    return {"path": out_path, "width": b.width(), "height": b.height(),
+            "underlay": underlay,
+            "alpha": {"coverage_pixels": summary["coverage_pixels"], "bbox": bbox},
+            "near_magenta_pixels": near}
 
 
 def _snapshot_export(**kwargs):

@@ -243,6 +243,8 @@ def main(argv=None):
     sub.add_parser("docs")
     sub.add_parser("layers")
     p = sub.add_parser("png"); p.add_argument("id"); p.add_argument("path")
+    p.add_argument("--underlay", choices=("magenta", "none"), default="magenta",
+                   help="透明区渲染为不透明洋红底衬(默认,供智能体读图);none 保留原生 alpha(如喂 ComfyUI)")
     for command in ("export", "selection-png", "snapshot"):
         p = sub.add_parser(command, help="整画布只读 PNG 导出（snapshot 同回调配对）")
         if command == "snapshot":
@@ -346,7 +348,8 @@ def main(argv=None):
         print(json.dumps(http(Krita + "/layers"), ensure_ascii=False, indent=1))
     elif a.cmd == "png":
         print(json.dumps(http(Krita + "/layer/png",
-                              {"id": a.id, "path": os.path.abspath(a.path)},
+                              {"id": a.id, "path": os.path.abspath(a.path),
+                               "underlay": a.underlay},
                               timeout=120), ensure_ascii=False))
     elif a.cmd in ("export", "selection-png", "snapshot"):
         payload = {"overwrite": a.overwrite}
