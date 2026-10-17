@@ -286,35 +286,48 @@ def _verify_attached(doc, parent, node, above):
     return actual
 
 
-def _create_attached(doc, name, node_type, parent, above, before_attach=None):
+def _create_attached(doc, name, node_type, parent, above, before_attach=None, write_context=None,
+                     before_create=None):
+    if write_context is not None:
+        write_context.before_mutation("create_node")
+    if before_create is not None:
+        before_create()
     node = doc.createNode(str(name), node_type)
+    if write_context is not None:
+        write_context.created(node)
     if node is None or node.type() != node_type.lower():
         raise OpError("createNode 失败或节点类型不符: {0}".format(node_type))
+    if write_context is not None:
+        write_context.before_mutation("attach")
     if before_attach is not None:
         before_attach()
     if not parent.addChildNode(node, above):
         raise OpError("addChildNode 失败: {0}".format(_node_id(node)))
-    return _verify_attached(doc, parent, node, above)
+    actual = _verify_attached(doc, parent, node, above)
+    if write_context is not None:
+        write_context.attached(actual)
+    return actual
 
 
-def layer_group(name, parent_id=None, above_layer_id=None):
+def layer_group(name, parent_id=None, above_layer_id=None, *, _write_context=None):
     """新建空 groupLayer,可嵌套;不移动/合并已有图层。"""
-    doc = _active_doc()
+    doc = _write_context.document if _write_context is not None else _active_doc()
     _check_rgba8(doc)
     parent, above = _insertion_target(doc, parent_id, above_layer_id)
-    node = _create_attached(doc, name, "groupLayer", parent, above)
+    node = _create_attached(doc, name, "groupLayer", parent, above, write_context=_write_context)
     doc.refreshProjection()
     return {"id": _node_id(node), "name": node.name(), "type": node.type(),
             "parent_id": _node_id(parent)}
 
 
 def layer_add(png_path, name, above_layer_id=None, offset_x=0, offset_y=0,
-              parent_id=None, mode=None, fit_canvas=None):
+              parent_id=None, mode=None, fit_canvas=None, *, _write_context=None,
+              _expected_source_sha256=None):
     """PNG → 新透明 paint layer；坐标映射见 placement，不动既有图层。"""
     from .placement import (PlacementError, PreprocessBudget, prepare_png,
                             resource_estimate, resize_rgba, resolve_mode, source_layout)
     budget = PreprocessBudget()
-    doc = _active_doc()
+    doc = _write_context.document if _write_context is not None else _active_doc()
     _check_rgba8(doc)
     for label, value in (("png_path", png_path), ("name", name),
                          ("parent_id", parent_id), ("above", above_layer_id)):
@@ -329,7 +342,9 @@ def layer_add(png_path, name, above_layer_id=None, offset_x=0, offset_y=0,
         parent, above_node = _insertion_target(doc, parent_id, above_layer_id)
         png_path = os.path.abspath(os.path.expanduser(png_path))
         encoded, mapping = prepare_png(png_path, doc.width(), doc.height(),
-                                       mode, offset_x, offset_y, fit_canvas, budget=budget)
+                                       mode, offset_x, offset_y, fit_canvas, budget=budget,
+                                       **({"expected_source_sha256": _expected_source_sha256}
+                                          if _expected_source_sha256 is not None else {}))
         sw, sh = mapping["source_size"]
         budget.check("Qt 解码前")
         # Decode ONLY the checked, bounded snapshot; do not reopen a mutable path.
@@ -360,7 +375,11 @@ def layer_add(png_path, name, above_layer_id=None, offset_x=0, offset_y=0,
         mapping["pixel_layout"] = "BGRA8"
         budget.check("创建节点前")
         layer = _create_attached(doc, name, "paintLayer", parent, above_node,
-                                 before_attach=lambda: budget.check("挂树前"))
+                                 before_attach=lambda: budget.check("挂树前"),
+                                 write_context=_write_context,
+                                 before_create=lambda: budget.check("创建节点前"))
+        if _write_context is not None:
+            _write_context.before_mutation("set_pixels")
         budget.check("写像素前")
         if not layer.setPixelData(buf, off_x, off_y, w, h):
             raise OpError("setPixelData 失败;新图层可能已挂树: {0}".format(_node_id(layer)))
@@ -479,3 +498,39 @@ def doc_save_as(path):
     if not doc.saveAs(path):
         raise OpError("saveAs 失败: {0}".format(path))
     return {"path": path}
+
+
+# Versioned append-only guard adapters. Legacy routes keep their old contract.
+_write_service = None
+
+
+def _guard_service():
+    global _write_service
+    from .write_guard import WriteService
+    if _write_service is None:
+        _write_service = WriteService(_krita())
+    return _write_service
+
+
+def _guard_invoke(method, *args, **kwargs):
+    from .write_guard import GuardError
+    try:
+        return getattr(_guard_service(), method)(*args, **kwargs)
+    except GuardError as exc:
+        raise OpError(str(exc)) from exc
+
+
+def write_target():
+    return _guard_invoke("target")
+
+
+def write_receipt(operation_id, service_id):
+    return _guard_invoke("receipt", operation_id, service_id)
+
+
+def guarded_group(**kwargs):
+    return _guard_invoke("execute", "group", layer_group, **kwargs)
+
+
+def guarded_add(**kwargs):
+    return _guard_invoke("execute", "add", layer_add, **kwargs)

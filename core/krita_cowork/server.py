@@ -17,6 +17,13 @@ from .bridge_qt import MainThreadBridge
 
 # POST 路由:路径 → (函数, 必填参数, 可选参数);ALIAS 把协议参数名映射为函数形参
 POST_ROUTES = {
+    "/write/v1/receipt": (ops.write_receipt, ("operation_id", "service_id"), ()),
+    "/write/v1/group": (ops.guarded_group,
+                        ("name", "operation_id", "expected_target", "expected_bindings"),
+                        ("parent_id", "above")),
+    "/write/v1/add": (ops.guarded_add,
+                      ("png_path", "name", "operation_id", "expected_target", "expected_bindings", "source_sha256"),
+                      ("above", "offset_x", "offset_y", "parent_id", "mode", "fit_canvas")),
     "/doc/new": (ops.doc_new, ("name", "width", "height"), ()),
     "/doc/save": (ops.doc_save_as, ("path",), ()),
     "/doc/export": (ops.doc_export, ("path",), ("overwrite", "expected_document_token")),
@@ -36,6 +43,7 @@ POST_ROUTES = {
     "/layer/rename": (ops.layer_rename, ("id", "name"), ()),
 }
 GET_ROUTES = {
+    "/write/v1/target": ops.write_target,
     "/ping": ops.ping,
     "/docs": ops.doc_info,
     "/layers": ops.layers,
@@ -112,6 +120,9 @@ class ControlServer(object):
                 except ValueError:
                     self.close_connection = True
                     raise ops.OpError("Content-Length 非数字")
+                if self.path.startswith("/write/v1/") and not 1 <= length <= 65536:
+                    self.close_connection = True
+                    raise ops.OpError("write/v1 JSON body 必须为 1..64KiB")
                 if self.path.split("?")[0].rstrip("/") == "/layer/vector" and not 1 <= length <= 131072:
                     self.close_connection = True
                     raise ops.OpError("vector JSON body 必须为 1..128KiB")
@@ -138,7 +149,7 @@ class ControlServer(object):
                 missing = [k for k in required if k not in data]
                 if missing:
                     raise ops.OpError("缺少必填参数: {0}".format(", ".join(missing)))
-                if path in ("/layer/props", "/layer/vector"):
+                if path in ("/layer/props", "/layer/vector") or path.startswith("/write/v1/"):
                     unknown = set(data) - set(required + optional)
                     if unknown or (path == "/layer/props" and not any(k in data for k in optional)):
                         raise ops.OpError("需要已知字段/属性,不接受未知字段")
