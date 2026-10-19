@@ -73,7 +73,8 @@ class Tests(unittest.TestCase):
             graph, contract = cc.prepare(WF, path.name, mode, {})
             self.assertEqual(graph, original)
             self.assertEqual(contract['outputs'], ['save'])
-        self.assertEqual(len(list(WF.glob('*_api.json'))), 5)
+        self.assertEqual({p.name for p in WF.glob('*_api.json')},
+                         {'wf_qwen21_t2i_api.json', 'wf_qwen21_edit_api.json'})
 
     def test_attachment_sampling_and_lora_chain(self):
         for mode in ('t2i', 'edit'):
@@ -420,11 +421,9 @@ class Tests(unittest.TestCase):
         self.assertFalse((self.root / 'runs').exists())
 
     def test_replay_all_workflows_with_complete_input_checks(self):
-        for name in ('wf_qwen21_t2i_api.json', 'wf_t2i_2k_api.json', 'wf_qwen21_edit_api.json', 'wf_edit_w4a8_api.json', 'wf_qwen21_localedit_api.json'):
+        for name in ('wf_qwen21_t2i_api.json', 'wf_qwen21_edit_api.json'):
             mode = 'edit' if 'edit' in name else 't2i'
-            # localedit 的掩码经 tomask 分支引用 load2，单图模式按设计拒绝，只能双图。
-            dual_only = 'localedit' in name
-            for double in ((False, True) if mode == 'edit' and not dual_only else ((True,) if mode == 'edit' else (False,))):
+            for double in ((False, True) if mode == 'edit' else (False,)):
                 self.graph, self.contract = cc.prepare(WF, name, mode, {'prompt': 'test'})
                 image = self.root / 'input.png'
                 image.write_bytes(PNG)

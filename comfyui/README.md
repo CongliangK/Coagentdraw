@@ -1,16 +1,15 @@
 # ComfyUI 工作流
 
-> **PR-01 目标流程/待迁移提示**：目标流程服务 Krita 线稿/平涂与安全候选循环。下列 t2i/2K 仅声明文生图，edit/w4a8 仅声明单/双参考图编辑；localedit 是 **latent 噪声掩码 + 裁剪重绘 + 像素贴回** 的受控区域合成，不是模型原生 Mask，也不具备专用 Lineart/Depth/Pose 条件。新路径须记录真实节点、输入角色、蒙版极性与对照运行证据；输出先候选，不以参考图输入或 prompt 描述冒称结构控制。localedit 已有 B 实机对照证据（见[掩码规范](#局部改图掩码规范2026-10-实测)与 [CAD-R02](<../design/调研报告/CAD-R02_局部精确改图与剪影调整实测.md>)）；真实模型效果以实机为准，不自动下载/换栈。 见[现行总纲](<../design/Krita中枢创作流程_正式执行规范.md>)。此提示不增加现有命令、参数或运行保证。
+> 本目录根目录只维护 T2I（文生图）和 I2I/ITI（图像编辑）两条 API 工作流。编辑支持单图/双图参考，不提供独立遮罩局部重绘或扩图流程，不保证指定区域外像素不变。输出先作为候选，由作者确认。
 
 [cwb.py](<../core/cwb.py>) 通过 ComfyUI `/prompt` API 提交的 API 格式工作流（Qwen-Image-2.1）。
 
 | 文件 | 用途 | 备注 |
 |---|---|---|
 | [wf_qwen21_t2i_api.json](wf_qwen21_t2i_api.json) | 文生图 | `cwb comfy-t2i` 默认加载 |
-| [wf_qwen21_edit_api.json](wf_qwen21_edit_api.json) | 图像编辑（单图/双图） | `cwb comfy-edit` 默认加载 |
-| [wf_t2i_2k_api.json](wf_t2i_2k_api.json) | 文生图（2K 变体） | 备用 |
-| [wf_edit_w4a8_api.json](wf_edit_w4a8_api.json) | 图像编辑（w4a8 量化变体） | 备用 |
-| [wf_qwen21_localedit_api.json](wf_qwen21_localedit_api.json) | 局部精确改图：底图+掩码双输入，掩码外像素贴回 | 必须提供 `--image2`（掩码） |
+| [wf_qwen21_edit_api.json](wf_qwen21_edit_api.json) | I2I/ITI 图像编辑（单图/双图） | `cwb comfy-edit` 默认加载 |
+
+另提供独立的 [画质优先局部编辑交互工作流](interactive/README.md)，可拖入 ComfyUI 使用；它不属于 CLI API 模板。
 
 ## 基线：用户提供的 Viggle Turbo 工作流
 
@@ -28,34 +27,20 @@
 工作流通过文件名引用模型，需自行放置到 ComfyUI 的 `models/` 对应目录：
 
 - `qwen_image_2.1_int8_convrot.safetensors`（UNET，int8）
-- `qwen3vl_8b_int8_convrot.safetensors`（CLIP，int8；w4a8 变体使用 `qwen3vl_8b_w4a8.safetensors`）
+- `qwen3vl_8b_int8_convrot.safetensors`（CLIP，int8）
 - `qwen_image_2.1_vae_bf16.safetensors`（VAE）
 - `Qwen-Image-2.1-viggle-turbo-v0.3-6step-lora-r128.safetensors`（LoRA，文生图和编辑均必需）
 - `qwen-image-2.1-consistency.safetensors`（LoRA，编辑必需）
 
 节点依赖包括 `ViggleTurboLora`、`ViggleTurboSigmas`（本机注册模块为 `custom_nodes.viggle_turbo`）、`QwenImage21Cache` 与 `TextEncodeQwenImage21`，以及标准加载/缩放/采样/解码/保存节点。缺失时补齐相同版本依赖，不静默跳过 LoRA 或回退旧采样器。
 
-### 自定义节点（localedit 必需）
-
-- [ComfyUI-Inpaint-CropAndStitch](https://github.com/lquesada/ComfyUI-Inpaint-CropAndStitch)（`InpaintCropImproved`/`InpaintStitchImproved`；本机已装于 `custom_nodes/`，依赖 cv2/numpy）
-
 ## 路径约定
 
 `cwb.py` 默认从仓库内本目录加载工作流；可用环境变量 `CWB_WF_DIR` 指向自定义工作流目录（缓存 `cowork_cache/` 也会创建在该目录下）。
 
-## 局部改图掩码规范（2026-10 实测）
+## 精简范围
 
-localedit 的精度来自机制保证而非提示词：底图经 VAEEncode 进入 latent，`SetLatentNoiseMask` 只在掩码区采样，重绘结果由 `InpaintStitchImproved` 在像素空间贴回。实测（Qwen-Image-2.1 int8，1024² 底图，768² 裁剪窗，掩码外扩 50px、羽化 32px，见 [CAD-R02](<../design/调研报告/CAD-R02_局部精确改图与剪影调整实测.md>)）：
-
-- 掩码外（扣除羽化带）与底图 **逐像素一致（差值全零）**；羽化带内允许混合。对照：纯参考图编辑圈外 12.3% 像素大变；全图 latent 掩码圈外仍有 VAE 往返噪声（均值约 1/255）。
-- 提示词只能影响掩码内；"圈外不变/无渐变"之类字句对模型无效，不要依赖。
-- 掩码设计规则（违反即失败，实测记录见 cache）：
-  1. 部件调整：掩码框住目标部件全形 + 余量，边界落在部件间自然空隙，不横切实体；
-  2. 大形/比例调整：保留一个锚点部件（通常是头/帽），掩码覆盖其余整体重做，提示词描述新大形而非"局部微调"；
-  3. 提示词不得含几何矛盾（如"大衣加长到膝下"且"腿部不变"）；
-  4. 剪影用途掩码内可能有淡灰残留，必要时在 Krita 侧阈值化后处理。
-- 掩码极性：白 = 重绘区，黑 = 保留区；掩码经 `ImageToMask`（红通道）输入，同时作为 `<image2>` 参考进入文本编码器（模型"看得见"标注区域）。
-- 边界渐变是模型在掩码边缘的固有行为，掩码切过服装时会出现；缓解靠掩码沿结构边界画或覆盖完整部件，机制本身不解决。
+2K 输出使用 T2I 的 `--w 2048 --h 2048`，不维护尺寸变体。w4a8 配置变体与独立 localedit 模板及契约已移除；历史局部编辑实测保留于 [CAD-R02](<../design/调研报告/CAD-R02_局部精确改图与剪影调整实测.md>)，不代表当前两条工作流具备该能力。旧文件名的 `--wf` 调用需更新；已有完整运行快照仍由原重放机制校验，不自动改写为新模板。
 
 ## CLI 参数与契约（CAD-10）
 
@@ -69,7 +54,7 @@ python3 core/cwb.py comfy-replay comfyui/cowork_cache/<UUID>/run.json
 ```
 
 - `--help`、参数解析及契约校验不创建缓存目录，不访问网络。缓存仅在有效生成任务开始时创建。
-- `--wf` 为 `CWB_WF_DIR` 内的 JSON 路径，禁止跳出目录（包括符号链接）。需同时提供同名 `*.contract.json`。各工作流均附契约；当前默认文生图/编辑模板已更新为 Turbo 配套配置，其他历史变体不代表本次已适配。
+- `--wf` 为 `CWB_WF_DIR` 内的 JSON 路径，禁止跳出目录（包括符号链接）。需同时提供同名 `*.contract.json`。两份工作流各附一份契约，契约不是额外工作流。
 - 契约版本为 1，包含 `mode`（t2i/edit）、`parameters`、`outputs`。每个参数显式声明 `node`、`input`、`class_type`，不推断任意节点；目标节点、类型、字段、默认值不匹配时立即失败。参数与图像映射的全部目标不得重叠，所有 LoadImage 节点均须由编辑契约映射。单图模式仅移除 collection 中的 image_2 引用；若图中任何其他输入（包括嵌套输入和非下载目标分支）仍引用第二个加载节点，则在文件读取、网络及缓存创建前明确拒绝，要求提供 --image2 或修改工作流。第一图的其他分支与双图的多输出仍受支持。编辑图还声明 `images.image1/image2/collection`。
 - `--seed` 为 0 至 2^64−1 的整数；`--steps` 为正整数；`--cfg` 为非负有限数；`--denoise` 为 0 至 1；T2I 的 `--w/--h` 为正整数。实际模型/节点的额外约束由服务端校验，离线校验不代表模型支持。
 - 未指定的参数保留工作流 JSON 中的值。当前 T2I 默认 928×1664（约9:16、1.5MP、32倍数的显式尺寸），seed=42、cfg=1；2K 输出通过显式尺寸参数指定，其效果/显存另需实测。当前两条 Turbo 模板**不支持 `--steps`、`--denoise`**，提供时在联网/创建缓存前报错，不假装映射到不相关字段。六节点调度固定于模板；CLI 保留这两个参数以兼容其他显式声明它们的旧/自定义契约。
@@ -86,4 +71,4 @@ python3 core/cwb.py comfy-replay comfyui/cowork_cache/<UUID>/run.json
 
 ### 验证范围
 
-`python3 -m unittest discover -s tests -v` 使用内存 mock transport，不监听 socket、不启动服务；覆盖四份图、两组参数、无效映射/参数、上传返回值、HTTP/JSON/执行错误、空输出、多输出、总预算、重复运行、重放和中断。离线结果不是真实生成证据。真实 ComfyUI 两组参数执行与重放由 #9 接收；编辑和模型效果仍由 #15/#16 等真实环境验收。
+`python3 -m unittest discover -s tests -v` 使用内存 mock transport，不监听 socket、不启动服务；覆盖两份图、两组参数、无效映射/参数、上传返回值、HTTP/JSON/执行错误、空输出、多输出、总预算、重复运行、重放和中断。离线结果不是真实生成证据。真实 ComfyUI 两组参数执行与重放由 #9 接收；编辑和模型效果仍由 #15/#16 等真实环境验收。

@@ -44,7 +44,7 @@ VAEEncode 全图 + `SetLatentNoiseMask` + denoise 1.0（723aca03 改帽 / 35263f
 
 ## 事实：Crop-and-Stitch 裁剪重绘——掩码外 bit-exact
 
-安装 [ComfyUI-Inpaint-CropAndStitch](https://github.com/lquesada/ComfyUI-Inpaint-CropAndStitch) 后以同底图/同掩码/同提示词/同种子对照（633cb7c2 改帽 / ee0cdbb2 改色；工作流已入库 [wf_qwen21_localedit_api.json](<../../comfyui/wf_qwen21_localedit_api.json>)）：
+安装 [ComfyUI-Inpaint-CropAndStitch](https://github.com/lquesada/ComfyUI-Inpaint-CropAndStitch) 后以同底图/同掩码/同提示词/同种子对照（633cb7c2 改帽 / ee0cdbb2 改色；历史工作流 `wf_qwen21_localedit_api.json` 已在仅维护 T2I/ITI 的精简中移除；以下保留当时的实测记录）：
 
 | 指标 | P3 全图掩码 | CS 裁剪重绘 |
 |---|---|---|
@@ -71,7 +71,7 @@ VAEEncode 全图 + `SetLatentNoiseMask` + denoise 1.0（723aca03 改帽 / 35263f
 
 ## 建议（待采纳，未成为规范）
 
-1. Krita 侧"圈选→导出掩码→localedit→候选层贴回"可作为阶段四"回看剪影"与阶段五"圈出问题→实际改图"的程序化闭环；候选层按 U10 走作者确认。
+1. 以下为历史方案建议，当前两条工作流未提供 localedit 入口。Krita 侧"圈选→导出掩码→localedit→候选层贴回"可作为阶段四"回看剪影"与阶段五"圈出问题→实际改图"的程序化闭环；候选层按 U10 走作者确认。
 2. 掩码画法遵循 [comfyui/README 掩码规范](<../../comfyui/README.md#局部改图掩码规范2026-10-实测>)四条规则；剪影用途在 Krita 侧补一步阈值化去淡灰。
 3. 待办：Viggle Turbo 六步 LoRA（约 4 倍提速，运行时挂载避免 int8 合并损失）与"无位移一致性"LoRA 下载后做对照（基线已备：改帽 12.2s、P1 覆盖率表）；阶段六可用"正视 1.2MP + 次参考 0.8MP"的分辨率分级参考策略（来源：社区功能流工作流，未实测）。
 
