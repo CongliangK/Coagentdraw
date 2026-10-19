@@ -48,7 +48,7 @@
 | 目录 | 内容 |
 |---|---|
 | [core/](core/) | 内核：Krita 插件 `krita_cowork`、命令行客户端 `cwb.py`、安装脚本 |
-| [design/](design/) | 设计工作流文档：[现行正式执行规范](<design/Krita中枢创作流程_正式执行规范.md>)、[调研报告](design/调研报告/README.md)、[八阶段执行手册](design/执行手册/README.md)（新八阶段一体简表；旧路径保留迁移说明） |
+| [design/](design/) | 设计工作流文档：[现行正式执行规范](<design/Krita中枢创作流程_正式执行规范.md>)、[调研报告](design/调研报告/README.md)、[八阶段执行手册](design/执行手册/README.md)（现行八阶段一体简表） |
 | [comfyui/](comfyui/) | ComfyUI 工作流（Qwen-Image-2.1，API 格式）与依赖模型说明 |
 
 ## 许可证
