@@ -1,21 +1,22 @@
 {
   "unet": {"class_type": "UNETLoader", "inputs": {"unet_name": "qwen_image_2.1_int8_convrot.safetensors", "weight_dtype": "default"}},
-  "cache": {"class_type": "QwenImage21Cache", "inputs": {"model": ["unet", 0], "device": "auto", "dtype": "default"}},
+  "turbo": {"class_type": "ViggleTurboLora", "inputs": {"model": ["unet", 0], "lora_name": "Qwen-Image-2.1-viggle-turbo-v0.3-6step-lora-r128.safetensors", "strength": 1}},
   "clip": {"class_type": "CLIPLoader", "inputs": {"clip_name": "qwen3vl_8b_int8_convrot.safetensors", "type": "qwen_image", "device": "default"}},
   "vae": {"class_type": "VAELoader", "inputs": {"vae_name": "qwen_image_2.1_vae_bf16.safetensors"}},
   "encode": {"class_type": "TextEncodeQwenImage21", "inputs": {
     "clip": ["clip", 0],
-    "prompt": "A neon shop sign that reads \"QWEN IMAGE 2.1\", rainy night, reflections on wet pavement, cinematic photography",
-    "negative_prompt": "",
-    "vae": ["vae", 0],
-    "resolution": 1024
+    "prompt": "角色设计探索，完整人物，清晰线稿与简单平涂，明确的剪影、服装结构和主色，干净背景。",
+    "negative_prompt": "artifacts, gpt-image, washed-out colors, low quality, low resolution, AI slop, deviantart, sloppy lines, rough sketch, blurry, indistinct, missing fingers, badly drawn hands, wrong number of fingers",
+    "resolution": 0
   }},
-  "latent": {"class_type": "EmptyLatentImage", "inputs": {"width": 1328, "height": 1328, "batch_size": 1}},
-  "sampler": {"class_type": "KSampler", "inputs": {
-    "model": ["cache", 0], "seed": 42, "steps": 25, "cfg": 1.0,
-    "sampler_name": "euler", "scheduler": "simple", "denoise": 1.0,
-    "positive": ["encode", 0], "negative": ["encode", 1], "latent_image": ["latent", 0]
+  "latent": {"class_type": "EmptyLatentImage", "inputs": {"width": 928, "height": 1664, "batch_size": 1}},
+  "sampler_select": {"class_type": "KSamplerSelect", "inputs": {"sampler_name": "euler"}},
+  "sigmas": {"class_type": "ViggleTurboSigmas", "inputs": {"latent": ["latent", 0], "nodes": "1.0, 0.9375, 0.875, 0.75, 0.5, 0.25"}},
+  "sampler": {"class_type": "SamplerCustom", "inputs": {
+    "model": ["turbo", 0], "add_noise": true, "noise_seed": 42, "cfg": 1,
+    "positive": ["encode", 0], "negative": ["encode", 1], "latent_image": ["latent", 0],
+    "sampler": ["sampler_select", 0], "sigmas": ["sigmas", 0]
   }},
   "decode": {"class_type": "VAEDecode", "inputs": {"samples": ["sampler", 0], "vae": ["vae", 0]}},
-  "save": {"class_type": "SaveImage", "inputs": {"images": ["decode", 0], "filename_prefix": "qwen21_t2i"}}
+  "save": {"class_type": "SaveImage", "inputs": {"images": ["decode", 0], "filename_prefix": "coagentdraw_qwen21_t2i"}}
 }

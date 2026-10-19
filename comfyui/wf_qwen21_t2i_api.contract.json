@@ -2,43 +2,11 @@
   "version": 1,
   "mode": "t2i",
   "parameters": {
-    "prompt": {
-      "node": "encode",
-      "input": "prompt",
-      "class_type": "TextEncodeQwenImage21"
-    },
-    "seed": {
-      "node": "sampler",
-      "input": "seed",
-      "class_type": "KSampler"
-    },
-    "steps": {
-      "node": "sampler",
-      "input": "steps",
-      "class_type": "KSampler"
-    },
-    "cfg": {
-      "node": "sampler",
-      "input": "cfg",
-      "class_type": "KSampler"
-    },
-    "denoise": {
-      "node": "sampler",
-      "input": "denoise",
-      "class_type": "KSampler"
-    },
-    "w": {
-      "node": "latent",
-      "input": "width",
-      "class_type": "EmptyLatentImage"
-    },
-    "h": {
-      "node": "latent",
-      "input": "height",
-      "class_type": "EmptyLatentImage"
-    }
+    "prompt": {"node": "encode", "input": "prompt", "class_type": "TextEncodeQwenImage21"},
+    "seed": {"node": "sampler", "input": "noise_seed", "class_type": "SamplerCustom"},
+    "cfg": {"node": "sampler", "input": "cfg", "class_type": "SamplerCustom"},
+    "w": {"node": "latent", "input": "width", "class_type": "EmptyLatentImage"},
+    "h": {"node": "latent", "input": "height", "class_type": "EmptyLatentImage"}
   },
-  "outputs": [
-    "save"
-  ]
+  "outputs": ["save"]
 }

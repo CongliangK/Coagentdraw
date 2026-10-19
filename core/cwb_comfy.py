@@ -86,7 +86,19 @@ def validate_contract(graph, contract, mode=None, single_image=False):
         if images['image1']['node'] == images['image2']['node']:
             raise ComfyError('两个图像输入不能映射到同一节点')
         node, field = validate_target(graph, images['collection'])
-        expected = {'image_1': [images['image1']['node'], 0], 'image_2': [images['image2']['node'], 0]}
+        preprocessing = contract.get('image_preprocessing', {})
+        if not isinstance(preprocessing, dict) or set(preprocessing) - {'image1'}:
+            raise ComfyError('无效图像预处理映射')
+        for key, target in preprocessing.items():
+            prep_node, prep_field = validate_target(graph, target)
+            if (prep_node, prep_field) in seen:
+                raise ComfyError('参数/图像预处理映射目标重叠')
+            seen.add((prep_node, prep_field))
+            if (target['class_type'] != 'ImageScaleToTotalPixels' or prep_field != 'image'
+                    or graph[prep_node]['inputs'][prep_field] != [images[key]['node'], 0]):
+                raise ComfyError('图像预处理必须明确缩放对应 LoadImage')
+        expected = {'image_1': image_reference(contract, 'image1'),
+                    'image_2': image_reference(contract, 'image2')}
         if single_image is True or (single_image is None and graph[node]['inputs'][field] == {'image_1': expected['image_1']}):
             expected.pop('image_2')
         if graph[node]['inputs'][field] != expected:
@@ -97,6 +109,12 @@ def validate_contract(graph, contract, mode=None, single_image=False):
     if {key for key, node in graph.items() if node['class_type'] == 'LoadImage'} != mapped_loaders:
         raise ComfyError('所有 LoadImage 节点必须由编辑契约明确映射')
     return contract
+
+
+def image_reference(contract, key):
+    """显式预处理输出；旧契约仍直接引用 LoadImage。"""
+    target = contract.get('image_preprocessing', {}).get(key, contract['images'][key])
+    return [target['node'], 0]
 
 
 def validate_single_image_dependencies(graph, contract):
@@ -306,7 +324,7 @@ def execute(graph, contract, workdir, base, *, inputs=None, timeout=1800, transp
             save()
         if blobs and 'image2' not in blobs:
             target = contract['images']['collection']
-            graph[target['node']]['inputs'][target['input']] = {'image_1': [contract['images']['image1']['node'], 0]}
+            graph[target['node']]['inputs'][target['input']] = {'image_1': image_reference(contract, 'image1')}
         write_json(run / 'workflow.json', graph)
         record['workflow_sha256'] = hashlib.sha256((run / 'workflow.json').read_bytes()).hexdigest()
         record['status'] = 'submitting'

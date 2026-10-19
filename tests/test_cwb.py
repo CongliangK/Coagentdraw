@@ -75,6 +75,89 @@ class Tests(unittest.TestCase):
             self.assertEqual(contract['outputs'], ['save'])
         self.assertEqual(len(list(WF.glob('*_api.json'))), 5)
 
+    def test_attachment_sampling_and_lora_chain(self):
+        for mode in ('t2i', 'edit'):
+            graph, contract = cc.prepare(WF, 'wf_qwen21_%s_api.json' % mode, mode, {})
+            self.assertEqual(graph['turbo']['inputs']['model'], ['unet', 0])
+            self.assertEqual(graph['turbo']['inputs']['strength'], 1)
+            self.assertEqual(graph['turbo']['inputs']['lora_name'], 'Qwen-Image-2.1-viggle-turbo-v0.3-6step-lora-r128.safetensors')
+            self.assertEqual(graph['sigmas']['inputs']['nodes'], '1.0, 0.9375, 0.875, 0.75, 0.5, 0.25')
+            latent = ['encode', 2] if mode == 'edit' else ['latent', 0]
+            self.assertEqual(graph['sigmas']['inputs']['latent'], latent)
+            self.assertEqual(graph['sampler']['inputs']['latent_image'], latent)
+            self.assertEqual(graph['sampler']['inputs']['sigmas'], ['sigmas', 0])
+            self.assertEqual(graph['sampler']['class_type'], 'SamplerCustom')
+            self.assertEqual(graph['sampler']['inputs']['cfg'], 1)
+            self.assertEqual(graph['sampler_select']['inputs']['sampler_name'], 'euler')
+            if mode == 'edit':
+                self.assertEqual(graph['consistency']['inputs']['model'], ['turbo', 0])
+                self.assertEqual(graph['consistency']['inputs']['lora_name'], 'qwen-image-2.1-consistency.safetensors')
+                self.assertEqual(graph['consistency']['inputs']['strength_model'], 1)
+                self.assertEqual(graph['cache']['inputs']['model'], ['consistency', 0])
+                self.assertEqual(graph['sampler']['inputs']['model'], ['cache', 0])
+                self.assertEqual(graph['scale1']['inputs']['megapixels'], 1.5)
+                self.assertEqual(graph['scale1']['inputs']['resolution_steps'], 32)
+            else:
+                self.assertEqual(graph['sampler']['inputs']['model'], ['turbo', 0])
+            for parameter in ('steps', 'denoise'):
+                with self.assertRaisesRegex(cc.ComfyError, '不支持参数'):
+                    cc.prepare(WF, 'wf_qwen21_%s_api.json' % mode, mode, {parameter: 1})
+
+    def test_long_chinese_prompt_is_not_rewritten_or_truncated(self):
+        prompt = '仅改变袖口纹样，保留角色身份、轮廓、服装与背景。Keep all other details unchanged.\n' * 100
+        for mode in ('edit', 't2i'):
+            graph, contract = cc.prepare(WF, 'wf_qwen21_%s_api.json' % mode, mode, {'prompt': prompt})
+            self.assertEqual(graph['encode']['inputs']['prompt'], prompt)
+            self.assertEqual(cc.effective(graph, contract)['prompt'], prompt)
+
+    def test_legacy_ksampler_parameters_and_replay(self):
+        graph, contract = copy.deepcopy(self.graph), copy.deepcopy(self.contract)
+        graph['sampler']['class_type'] = 'KSampler'
+        graph['sampler']['inputs'] = {
+            'model': ['turbo', 0], 'seed': 42, 'steps': 25, 'cfg': 1,
+            'sampler_name': 'euler', 'scheduler': 'simple', 'denoise': 1,
+            'positive': ['encode', 0], 'negative': ['encode', 1], 'latent_image': ['latent', 0],
+        }
+        for name in ('seed', 'steps', 'cfg', 'denoise'):
+            contract['parameters'][name] = {'node': 'sampler', 'input': name, 'class_type': 'KSampler'}
+        cc.write_json(self.root / 'legacy.json', graph)
+        cc.write_json(self.root / 'legacy.contract.json', contract)
+        self.graph, self.contract = cc.prepare(self.root, 'legacy.json', 't2i', {'steps': 10, 'denoise': .5})
+        record, path = self.run_graph()
+        loaded, saved_contract, old = cc.load_replay(path, BASE)
+        replayed, _ = cc.execute(loaded, saved_contract, self.root / 'runs', BASE, transport=self.fake, replay=old)
+        self.assertEqual(replayed['parameters']['steps'], 10)
+        self.assertEqual(replayed['parameters']['denoise'], .5)
+
+    def test_preprocessing_invalid_mapping_before_io(self):
+        for mutation in (
+            lambda c: c['image_preprocessing']['image1'].update(node='missing'),
+            lambda c: c['image_preprocessing']['image1'].update(class_type='LoadImage'),
+            lambda c: c['image_preprocessing'].update(image2=c['image_preprocessing']['image1']),
+        ):
+            graph, contract = cc.prepare(WF, 'wf_qwen21_edit_api.json', 'edit', {})
+            mutation(contract)
+            with self.assertRaises(cc.ComfyError):
+                cc.execute(graph, contract, self.root / 'runs', BASE, transport=self.fake)
+        graph, contract = cc.prepare(WF, 'wf_qwen21_edit_api.json', 'edit', {})
+        graph['scale1']['inputs']['image'] = ['load2', 0]
+        with self.assertRaises(cc.ComfyError):
+            cc.execute(graph, contract, self.root / 'runs', BASE, transport=self.fake)
+        self.assertFalse(self.fake.calls)
+        self.assertFalse((self.root / 'runs').exists())
+
+    def test_legacy_graph_without_preprocessing_remains_supported(self):
+        graph, contract = cc.prepare(WF, 'wf_qwen21_edit_api.json', 'edit', {})
+        del contract['image_preprocessing']
+        del graph['scale1']
+        graph['encode']['inputs']['images']['image_1'] = ['load1', 0]
+        cc.validate_contract(graph, contract)
+        self.graph, self.contract = graph, contract
+        image = self.root / 'legacy.png'; image.write_bytes(PNG)
+        record, path = self.run_graph(inputs={'image1': image})
+        cc.load_replay(path, BASE)
+        self.assertEqual(record['status'], 'completed')
+
     def test_help_invalid_args_no_files(self):
         script = self.root / 'core' / 'cwb.py'
         script.parent.mkdir()
@@ -89,13 +172,14 @@ class Tests(unittest.TestCase):
 
     def test_two_parameter_sets_exact_snapshots(self):
         requests = []
-        for seed, steps in ((42, 25), (123, 10)):
-            self.graph, self.contract = cc.prepare(WF, 'wf_qwen21_t2i_api.json', 't2i', {'prompt': 'test', 'seed': seed, 'steps': steps, 'cfg': 2, 'denoise': .5, 'w': 512, 'h': 768})
+        for seed, cfg in ((42, 1), (123, 1.5)):
+            self.graph, self.contract = cc.prepare(WF, 'wf_qwen21_t2i_api.json', 't2i', {'prompt': 'test', 'seed': seed, 'cfg': cfg, 'w': 512, 'h': 768})
             record, path = self.run_graph()
             posted = [kw['payload']['prompt'] for p, kw, _ in self.fake.calls if p == '/prompt'][-1]
             self.assertEqual(cc.read_json(path.parent / 'workflow.json'), posted)
             self.assertEqual(record['parameters']['seed'], seed)
-            self.assertEqual(record['parameters']['steps'], steps)
+            self.assertEqual(record['parameters']['cfg'], cfg)
+            self.assertEqual(posted['sampler']['inputs']['noise_seed'], seed)
             self.assertEqual(record['status'], 'completed')
             requests.append(posted)
         self.assertNotEqual(requests[0], requests[1])
@@ -112,7 +196,7 @@ class Tests(unittest.TestCase):
         self.assertFalse(self.fake.calls)
 
     def test_bad_contracts_and_unsupported_parameter(self):
-        mutations = [lambda c: c['parameters']['steps'].update(node='missing'), lambda c: c['parameters']['steps'].update(input='missing'), lambda c: c['parameters']['steps'].update(class_type='unknown'), lambda c: c.update(outputs=['missing']), lambda c: c['parameters'].update(cfg=c['parameters']['steps'])]
+        mutations = [lambda c: c['parameters']['cfg'].update(node='missing'), lambda c: c['parameters']['cfg'].update(input='missing'), lambda c: c['parameters']['cfg'].update(class_type='unknown'), lambda c: c.update(outputs=['missing']), lambda c: c['parameters'].update(seed=c['parameters']['cfg'])]
         for mutation in mutations:
             contract = copy.deepcopy(self.contract)
             mutation(contract)
@@ -147,6 +231,8 @@ class Tests(unittest.TestCase):
             graph = cc.read_json(path.parent / 'workflow.json')
             self.assertEqual(graph['load1']['inputs']['image'], '目录 / &/服务端 &?#.png [input]')
             self.assertEqual(len(graph['encode']['inputs']['images']), 2 if double else 1)
+            self.assertEqual(graph['encode']['inputs']['images']['image_1'], ['scale1', 0])
+            self.assertEqual(graph['scale1']['inputs']['image'], ['load1', 0])
             self.assertEqual(len(record['uploads']), len(inputs))
             self.assertEqual(Path(record['uploads'][0]['local_path']).read_bytes(), PNG)
 

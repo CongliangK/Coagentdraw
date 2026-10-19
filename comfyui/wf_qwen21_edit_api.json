@@ -1,122 +1,27 @@
 {
- "unet": {
-  "class_type": "UNETLoader",
-  "inputs": {
-   "unet_name": "qwen_image_2.1_int8_convrot.safetensors",
-   "weight_dtype": "default"
-  }
- },
- "cache": {
-  "class_type": "QwenImage21Cache",
-  "inputs": {
-   "model": [
-    "unet",
-    0
-   ],
-   "device": "auto",
-   "dtype": "default"
-  }
- },
- "clip": {
-  "class_type": "CLIPLoader",
-  "inputs": {
-   "clip_name": "qwen3vl_8b_int8_convrot.safetensors",
-   "type": "qwen_image",
-   "device": "default"
-  }
- },
- "vae": {
-  "class_type": "VAELoader",
-  "inputs": {
-   "vae_name": "qwen_image_2.1_vae_bf16.safetensors"
-  }
- },
- "load1": {
-  "class_type": "LoadImage",
-  "inputs": {
-   "image": "portrait_model_denim.png"
-  }
- },
- "load2": {
-  "class_type": "LoadImage",
-  "inputs": {
-   "image": "clothing_light_blue_denim_shirt.png"
-  }
- },
- "encode": {
-  "class_type": "TextEncodeQwenImage21",
-  "inputs": {
-   "clip": [
-    "clip",
-    0
-   ],
-   "prompt": "Change the outfit of the woman in <image1> to the light blue denim shirt shown in <image2>. Keep her face, hairstyle, pose and the background unchanged.",
-   "negative_prompt": "",
-   "vae": [
-    "vae",
-    0
-   ],
-   "resolution": 0,
-   "images": {
-    "image_1": [
-     "load1",
-     0
-    ],
-    "image_2": [
-     "load2",
-     0
-    ]
-   }
-  }
- },
- "sampler": {
-  "class_type": "KSampler",
-  "inputs": {
-   "model": [
-    "cache",
-    0
-   ],
-   "seed": 42,
-   "steps": 25,
-   "cfg": 1.0,
-   "sampler_name": "euler",
-   "scheduler": "simple",
-   "denoise": 1.0,
-   "positive": [
-    "encode",
-    0
-   ],
-   "negative": [
-    "encode",
-    1
-   ],
-   "latent_image": [
-    "encode",
-    2
-   ]
-  }
- },
- "decode": {
-  "class_type": "VAEDecode",
-  "inputs": {
-   "samples": [
-    "sampler",
-    0
-   ],
-   "vae": [
-    "vae",
-    0
-   ]
-  }
- },
- "save": {
-  "class_type": "SaveImage",
-  "inputs": {
-   "images": [
-    "decode",
-    0
-   ],
-   "filename_prefix": "qwen21_edit"
-  }
- }
+  "unet": {"class_type": "UNETLoader", "inputs": {"unet_name": "qwen_image_2.1_int8_convrot.safetensors", "weight_dtype": "default"}},
+  "turbo": {"class_type": "ViggleTurboLora", "inputs": {"model": ["unet", 0], "lora_name": "Qwen-Image-2.1-viggle-turbo-v0.3-6step-lora-r128.safetensors", "strength": 1}},
+  "consistency": {"class_type": "LoraLoaderModelOnly", "inputs": {"model": ["turbo", 0], "lora_name": "qwen-image-2.1-consistency.safetensors", "strength_model": 1}},
+  "cache": {"class_type": "QwenImage21Cache", "inputs": {"model": ["consistency", 0], "device": "auto", "dtype": "default"}},
+  "clip": {"class_type": "CLIPLoader", "inputs": {"clip_name": "qwen3vl_8b_int8_convrot.safetensors", "type": "qwen_image", "device": "default"}},
+  "vae": {"class_type": "VAELoader", "inputs": {"vae_name": "qwen_image_2.1_vae_bf16.safetensors"}},
+  "load1": {"class_type": "LoadImage", "inputs": {"image": "input.png"}},
+  "load2": {"class_type": "LoadImage", "inputs": {"image": "reference.png"}},
+  "scale1": {"class_type": "ImageScaleToTotalPixels", "inputs": {"image": ["load1", 0], "upscale_method": "lanczos", "megapixels": 1.5, "resolution_steps": 32}},
+  "encode": {"class_type": "TextEncodeQwenImage21", "inputs": {
+    "clip": ["clip", 0],
+    "prompt": "仅修改图1中明确指定的内容。保留人物身份、脸部特征、发型、未指定修改的服装结构、姿态、构图及背景。保持原图线条风格与配色。",
+    "negative_prompt": "artifacts, gpt-image, washed-out colors, low quality, low resolution, AI slop, deviantart, sloppy lines, rough sketch, blurry, indistinct, missing fingers, badly drawn hands, wrong number of fingers",
+    "vae": ["vae", 0], "resolution": 0,
+    "images": {"image_1": ["scale1", 0], "image_2": ["load2", 0]}
+  }},
+  "sampler_select": {"class_type": "KSamplerSelect", "inputs": {"sampler_name": "euler"}},
+  "sigmas": {"class_type": "ViggleTurboSigmas", "inputs": {"latent": ["encode", 2], "nodes": "1.0, 0.9375, 0.875, 0.75, 0.5, 0.25"}},
+  "sampler": {"class_type": "SamplerCustom", "inputs": {
+    "model": ["cache", 0], "add_noise": true, "noise_seed": 42, "cfg": 1,
+    "positive": ["encode", 0], "negative": ["encode", 1], "latent_image": ["encode", 2],
+    "sampler": ["sampler_select", 0], "sigmas": ["sigmas", 0]
+  }},
+  "decode": {"class_type": "VAEDecode", "inputs": {"samples": ["sampler", 0], "vae": ["vae", 0]}},
+  "save": {"class_type": "SaveImage", "inputs": {"images": ["decode", 0], "filename_prefix": "coagentdraw_qwen21_edit"}}
 }

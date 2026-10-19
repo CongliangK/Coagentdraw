@@ -12,6 +12,17 @@
 | [wf_edit_w4a8_api.json](wf_edit_w4a8_api.json) | 图像编辑（w4a8 量化变体） | 备用 |
 | [wf_qwen21_localedit_api.json](wf_qwen21_localedit_api.json) | 局部精确改图：底图+掩码双输入，掩码外像素贴回 | 必须提供 `--image2`（掩码） |
 
+## 基线：用户提供的 Viggle Turbo 工作流
+
+当前两条 API 模板改编自用户提供的 `▶▷Qwen-image21-图像编辑&生图-Viggle Turb_my.json`（SHA-256：`2a47a20d0795b2a54a4770ac5499c6814ecbb6c3092d3f66160bd916cc58a9e7`）。详细节点对应、取舍和证据边界见 [改造说明](<qwen21_viggle_适配说明.md>)。附件本身已经是 API 格式，不是前端布局 JSON。
+
+- **编辑默认单图**：上传第一张图，Lanczos 缩放至约 1.5MP、32 像素倍数；编码器 `resolution=0`；直接使用编码器返回的 latent 及其尺寸。输出尺寸可能不同于输入，不是同尺寸像素替换。
+- **编辑必经双 LoRA**：UNET → Turbo LoRA（1）→ consistency LoRA（1）→ QwenImage21Cache → SamplerCustom。两者不可混为一谈；文生图按附件仅使用 Turbo LoRA，不凭空添加编辑一致性 LoRA。
+- **保留配套采样**：Euler、CFG=1、开启噪声、六节点 `1.0, 0.9375, 0.875, 0.75, 0.5, 0.25`，由 ViggleTurboSigmas 按实际 latent 尺寸处理；不再用普通 KSampler/simple/25步替代。
+- 双图仅通过显式 `--image2` 使用，为实验入口，不作为一致性可靠路径。优先从已确认主稿逐次单图编辑，每次人工复看，保留主稿和备选。
+- 按用户实测经验，中英文理解差距不大、可使用长文本；不强制英文、不截短 prompt。明确描述修改项与保留项，但不把提示词承诺当作区域外像素锁定。
+- 附件的默认负面词包含 `rough sketch`，此处为忠实基线予以保留；若目标为粗线稿，需在自定义模板中显式调整，避免与正面提示冲突。
+
 ## 依赖模型
 
 工作流通过文件名引用模型，需自行放置到 ComfyUI 的 `models/` 对应目录：
@@ -19,11 +30,14 @@
 - `qwen_image_2.1_int8_convrot.safetensors`（UNET，int8）
 - `qwen3vl_8b_int8_convrot.safetensors`（CLIP，int8；w4a8 变体使用 `qwen3vl_8b_w4a8.safetensors`）
 - `qwen_image_2.1_vae_bf16.safetensors`（VAE）
+- `Qwen-Image-2.1-viggle-turbo-v0.3-6step-lora-r128.safetensors`（LoRA，文生图和编辑均必需）
+- `qwen-image-2.1-consistency.safetensors`（LoRA，编辑必需）
+
+节点依赖包括 `ViggleTurboLora`、`ViggleTurboSigmas`（本机注册模块为 `custom_nodes.viggle_turbo`）、`QwenImage21Cache` 与 `TextEncodeQwenImage21`，以及标准加载/缩放/采样/解码/保存节点。缺失时补齐相同版本依赖，不静默跳过 LoRA 或回退旧采样器。
 
 ### 自定义节点（localedit 必需）
 
 - [ComfyUI-Inpaint-CropAndStitch](https://github.com/lquesada/ComfyUI-Inpaint-CropAndStitch)（`InpaintCropImproved`/`InpaintStitchImproved`；本机已装于 `custom_nodes/`，依赖 cv2/numpy）
-- 可选未实测：`viggle_turbo.py`（Qwen-Image-2.1 六步 turbo LoRA 运行时挂载节点）及其 LoRA 文件；LoRA 未下载前不可用，下载后需另行对照验收，不入库声称效果
 
 ## 路径约定
 
@@ -46,17 +60,20 @@ localedit 的精度来自机制保证而非提示词：底图经 VAEEncode 进�
 ## CLI 参数与契约（CAD-10）
 
 ```bash
-python3 core/cwb.py comfy-t2i "a castle" --seed 42 --steps 25 --cfg 1 --denoise 1
-python3 core/cwb.py comfy-t2i "a castle" --wf wf_t2i_2k_api.json --seed 43 --steps 10
-python3 core/cwb.py comfy-edit base.png "change the outfit" --image2 ref.png --seed 42
+python3 core/cwb.py comfy-t2i "古堡，清晰线稿与简单平涂" --seed 42 --cfg 1
+python3 core/cwb.py comfy-t2i "古堡，清晰线稿与简单平涂" --w 2048 --h 2048 --seed 43
+python3 core/cwb.py comfy-edit base.png "仅将外套改为深蓝色，保留脸部、发型、姿态、服装结构和背景。" --seed 42
+# 实验双图；不建议作为默认角色一致性路线
+python3 core/cwb.py comfy-edit base.png "仅将图1外套配色改为图2的配色，保留图1其余内容。" --image2 ref.png --seed 42
 python3 core/cwb.py comfy-replay comfyui/cowork_cache/<UUID>/run.json
 ```
 
 - `--help`、参数解析及契约校验不创建缓存目录，不访问网络。缓存仅在有效生成任务开始时创建。
-- `--wf` 为 `CWB_WF_DIR` 内的 JSON 路径，禁止跳出目录（包括符号链接）。需同时提供同名 `*.contract.json`。五份已入库工作流均附契约；原工作流文件没有改动。
+- `--wf` 为 `CWB_WF_DIR` 内的 JSON 路径，禁止跳出目录（包括符号链接）。需同时提供同名 `*.contract.json`。各工作流均附契约；当前默认文生图/编辑模板已更新为 Turbo 配套配置，其他历史变体不代表本次已适配。
 - 契约版本为 1，包含 `mode`（t2i/edit）、`parameters`、`outputs`。每个参数显式声明 `node`、`input`、`class_type`，不推断任意节点；目标节点、类型、字段、默认值不匹配时立即失败。参数与图像映射的全部目标不得重叠，所有 LoadImage 节点均须由编辑契约映射。单图模式仅移除 collection 中的 image_2 引用；若图中任何其他输入（包括嵌套输入和非下载目标分支）仍引用第二个加载节点，则在文件读取、网络及缓存创建前明确拒绝，要求提供 --image2 或修改工作流。第一图的其他分支与双图的多输出仍受支持。编辑图还声明 `images.image1/image2/collection`。
 - `--seed` 为 0 至 2^64−1 的整数；`--steps` 为正整数；`--cfg` 为非负有限数；`--denoise` 为 0 至 1；T2I 的 `--w/--h` 为正整数。实际模型/节点的额外约束由服务端校验，离线校验不代表模型支持。
-- 未指定的参数保留工作流 JSON 中的值。既有默认 T2I 保持 1328×1328、seed=42、steps=25、cfg=1、denoise=1；显式选择 2K 变体时保留其 2048×2048。不支持的参数明确报错。
+- 未指定的参数保留工作流 JSON 中的值。当前 T2I 默认 928×1664（约9:16、1.5MP、32倍数的显式尺寸），seed=42、cfg=1；2K 输出通过显式尺寸参数指定，其效果/显存另需实测。当前两条 Turbo 模板**不支持 `--steps`、`--denoise`**，提供时在联网/创建缓存前报错，不假装映射到不相关字段。六节点调度固定于模板；CLI 保留这两个参数以兼容其他显式声明它们的旧/自定义契约。
+- 契约版本1新增可选 `image_preprocessing.image1`，目标严格指向 `ImageScaleToTotalPixels.image` 且必须引用第一张 LoadImage；图像集合引用缩放节点输出。旧契约无此字段时仍直接引用 LoadImage，旧运行快照不迁移。单图去除第二张引用时保留第一张缩放链，重放亦核对同一链路。`images` 使用项目已有嵌套 autogrow 表示；附件使用 `images.image_1` 扁平表示，语义对应，目标 ComfyUI 版本的实际执行仍须联调。
 - `--timeout` 默认为 1800 秒，覆盖上传、提交、轮询与下载；每次网络请求使用剩余预算，返回后继续检查总预算。底层 urllib 的 timeout 为阻塞 I/O 超时，不是操作系统硬中断；极端慢速分块响应可能延迟本次调用返回。不会因此重复提交。
 - 上传使用 UUID 文件名且不覆盖已有文件，按服务端返回的 name/subfolder/type 填入 LoadImage（带 `[type]` 标记），不假设服务端沿用请求名称。输入文件全部成功读取、契约通过后才上传。
 - 输出按契约列出的节点及各节点图像顺序保存全部图片；保留 node_id、index、filename、subfolder、type。下载查询用 URL 编码，路径使用本地序号，服务端文件名不能改写本地目录。`--add` 仅在恰好一个输出时导入新图层；多输出保留全部文件并报错要求手动用 `add` 选择，不任意取首图。
