@@ -6,9 +6,11 @@ not a lock against Krita worker threads; waitForDone/refreshProjection fence the
 projection before sampling. No event loop is pumped between the two reads.
 """
 import hashlib
+from inspect import CO_ASYNC_GENERATOR, CO_COROUTINE, CO_GENERATOR
 import os
 import struct
 import tempfile
+import threading
 import time
 from datetime import datetime, timezone
 import uuid
@@ -23,6 +25,57 @@ class SnapshotError(ValueError):
 # profile would change the meaning of the PNG samples. No implicit conversion.
 SUPPORTED_PROFILE = "sRGB-elle-V2-srgbtrc.icc"
 
+# Admission for Document exports only, NOT the shared layer codecs below.
+# 4096² / 8192x2048 are accepted. The estimated simultaneously owned buffers
+# are bounded separately; this is not a bound on Krita/Qt or process RSS.
+MAX_EXPORT_PIXELS = 16 * 1024 * 1024
+MAX_EXPORT_PIXEL_BYTES = 64 * 1024 * 1024
+MAX_EXPORT_OWNED_BYTES = 256 * 1024 * 1024
+ENCODE_BLOCK_BYTES = 64 * 1024
+EXPORT_SCRATCH_BYTES = 4 * 1024 * 1024
+_EXPORT_LOCK = threading.Lock()
+
+
+def _release_failure_frames(error):
+    """Drop failed capture/codec buffers before releasing the export slot.
+
+    MainThreadBridge transports the exception itself. Its result box and the
+    traceback can form a cycle, retaining finished capture/codec/publish locals
+    until cyclic GC. Clear only this module's synchronous, ended frames,
+    including those reached through chained/grouped errors,
+    without deleting exception types, messages, chains or traceback locations.
+    Read BaseException's descriptors directly: legal exception subclasses can
+    override these attribute getters. Queue all linked errors before clearing,
+    so a cleanup failure cannot skip the remainder of an exception group.
+    Never clear external frames or generator/coroutine frames: on some Python
+    versions clearing a suspended frame closes it and runs its finally block.
+    Active synchronous frames reject clear() (the export wrapper owns no pixel
+    buffers). This neither forces GC nor changes bridge cancellation semantics.
+    """
+    pending, seen = [error], set()
+    while pending:
+        current = pending.pop()
+        if id(current) in seen:
+            continue
+        seen.add(id(current))
+        tb = BaseException.__traceback__.__get__(current)
+        for linked in (BaseException.__cause__.__get__(current),
+                       BaseException.__context__.__get__(current)):
+            if linked is not None:
+                pending.append(linked)
+        # type() also avoids a subclass's overridable __class__ attribute.
+        if issubclass(type(current), BaseExceptionGroup):
+            pending.extend(BaseExceptionGroup.exceptions.__get__(current))
+        while tb is not None:
+            frame, tb = tb.tb_frame, tb.tb_next
+            if (frame.f_globals is not globals() or
+                    frame.f_code.co_flags & (CO_GENERATOR | CO_COROUTINE | CO_ASYNC_GENERATOR)):
+                continue
+            try:
+                frame.clear()
+            except BaseException:
+                pass  # Active frames / cleanup failure must not replace error.
+
 
 def _digest(data):
     return hashlib.sha256(data).hexdigest()
@@ -36,16 +89,62 @@ def _size(width, height):
 
 def _pixels(data, width, height, channels):
     _size(width, height)
-    if isinstance(data, (int, str)):
-        raise SnapshotError("pixelData 必须是原生字节缓冲区")
+    if type(channels) is not int or channels not in (1, 4):
+        raise SnapshotError("像素仅支持 RGBA8 或 Gray8")
+    expected = width * height * channels
+    # Inspect actual buffer size before bytes() can copy it. Do not execute an
+    # arbitrary iterable/__bytes__ implementation to discover its length.
     try:
-        raw = bytes(data)
+        view = memoryview(data)
     except (TypeError, ValueError) as exc:
         raise SnapshotError("pixelData 不是可读取的字节缓冲区") from exc
-    expected = width * height * channels
-    if len(raw) != expected:
-        raise SnapshotError("pixelData 长度异常: {0} != {1}".format(len(raw), expected))
-    return raw
+    try:
+        if view.nbytes != expected:
+            raise SnapshotError("pixelData 长度异常: {0} != {1}".format(view.nbytes, expected))
+        return data if type(data) is bytes else view.tobytes()
+    finally:
+        view.release()
+
+
+def _png_byte_limit(width, height, channels):
+    # Policy allowance (not a claimed zlib mathematical bound): filter bytes,
+    # 1% expansion/chunk overhead plus 64 KiB. Enforced before every append.
+    scanline_bytes = (width * channels + 1) * height
+    return scanline_bytes + scanline_bytes // 100 + ENCODE_BLOCK_BYTES
+
+
+def _export_budget(width, height, kinds):
+    _size(width, height)
+    pixels = width * height
+    if pixels > MAX_EXPORT_PIXELS:
+        raise SnapshotError("导出总像素超预算: {0} > {1}".format(pixels, MAX_EXPORT_PIXELS))
+    raw_sizes = {kind: pixels * (4 if kind == "projection" else 1) for kind in kinds}
+    if any(size > MAX_EXPORT_PIXEL_BYTES for size in raw_sizes.values()):
+        raise SnapshotError("导出单像素缓冲区超预算")
+    png_limits = {kind: _png_byte_limit(width, height, 4 if kind == "projection" else 1)
+                  for kind in kinds}
+    projection, selection = raw_sizes.get("projection", 0), raw_sizes.get("selection", 0)
+    # BGRA + swap bytearray + returned RGBA bytes; BGRA is released before
+    # reading the mask. Native-return buffer + Python copy for the mask.
+    peak = max(3 * projection, projection + 2 * selection)
+    captured, previous_pngs = sum(raw_sizes.values()), 0
+    for limit in png_limits.values():
+        # bytearray growth + final immutable bytes (2.5x allowance), while all
+        # captured pixels and any earlier PNG remain live. Fixed scratch covers
+        # bounded row/chunk copies and an allowance for zlib/Python overhead.
+        peak = max(peak, captured + previous_pngs + (5 * limit + 1) // 2)
+        previous_pngs += limit
+    estimate = peak + EXPORT_SCRATCH_BYTES
+    if estimate > MAX_EXPORT_OWNED_BYTES:
+        raise SnapshotError("导出同时持有缓冲区估计超预算: {0} > {1}".format(estimate, MAX_EXPORT_OWNED_BYTES))
+    return {"policy": "document-export-v1", "canvas_pixels": pixels,
+            "captured_pixel_bytes": captured, "png_byte_limits": png_limits,
+            "estimated_owned_buffer_bytes": estimate,
+            "max_canvas_pixels": MAX_EXPORT_PIXELS,
+            "max_pixel_buffer_bytes": MAX_EXPORT_PIXEL_BYTES,
+            "max_estimated_owned_buffer_bytes": MAX_EXPORT_OWNED_BYTES,
+            "encoder_block_bytes": ENCODE_BLOCK_BYTES, "max_concurrent_document_exports": 1,
+            "scope": "owned-buffer-estimate; excludes document storage/native API internals/process RSS"}
 
 
 # Live-verified 2026-10 (Krita 6.0.4 AppImage): pixelData/setPixelData use
@@ -127,19 +226,42 @@ def _chunk(kind, payload):
 
 def encode_png(data, width, height, channels):
     """Lossless 8-bit RGBA (6) or grayscale (0); gray has NO alpha channel."""
-    if channels not in (1, 4):
+    if type(channels) is not int or channels not in (1, 4):
         raise SnapshotError("PNG 仅支持 RGBA8 或 Gray8")
     raw = _pixels(data, width, height, channels)
     stride = width * channels
-    scanlines = b"".join(b"\0" + raw[y * stride:(y + 1) * stride]
-                         for y in range(height))
+    limit = _png_byte_limit(width, height, channels)
     ihdr = struct.pack(">IIBBBBB", width, height, 8, 6 if channels == 4 else 0, 0, 0, 0)
     # No sRGB/gAMA/iCCP chunk on either variant: samples are gated to sRGB
     # (SUPPORTED_PROFILE) and untagged PNG reads as sRGB by convention; the
     # explicit sRGB chunk renders as a black frame in some agent vision
     # decoders. Gray8 is coverage, NOT color, and must stay untagged anyway.
-    return (b"\x89PNG\r\n\x1a\n" + _chunk(b"IHDR", ihdr) +
-            _chunk(b"IDAT", zlib.compress(scanlines, 6)) + _chunk(b"IEND", b""))
+    encoded = bytearray(b"\x89PNG\r\n\x1a\n" + _chunk(b"IHDR", ihdr))
+
+    def append_chunk(kind, payload):
+        if len(encoded) + len(payload) + 12 > limit:
+            raise SnapshotError("PNG 编码输出超预算")
+        encoded.extend(_chunk(kind, payload))
+
+    def append_compressed(data):
+        for offset in range(0, len(data), ENCODE_BLOCK_BYTES):
+            append_chunk(b"IDAT", data[offset:offset + ENCODE_BLOCK_BYTES])
+
+    compressor = zlib.compressobj(6)
+    # Never materialize an entire filtered image. Each compressor input and
+    # IDAT payload is at most 64 KiB, including very wide RGBA rows.
+    view = memoryview(raw)
+    try:
+        for y in range(height):
+            append_compressed(compressor.compress(b"\0"))
+            start, end = y * stride, (y + 1) * stride
+            for offset in range(start, end, ENCODE_BLOCK_BYTES):
+                append_compressed(compressor.compress(view[offset:min(end, offset + ENCODE_BLOCK_BYTES)]))
+        append_compressed(compressor.flush())
+    finally:
+        view.release()
+    append_chunk(b"IEND", b"")
+    return bytes(encoded)
 
 
 def mask_bounds(data, width, height):
@@ -285,6 +407,28 @@ class SnapshotService:
     def export(self, *, projection_path=None, selection_path=None, overwrite=False,
                selection_mode="selection", expected_document_token=None):
         """One invocation == one main-thread callback, even for a paired export."""
+        # MainThreadBridge serializes normal calls. Also reject accidental
+        # concurrent/reentrant exports, including separate service instances.
+        # No waiting/queue allocation and no timeout-as-cancellation claim.
+        if not _EXPORT_LOCK.acquire(blocking=False):
+            raise SnapshotError("已有文档快照导出进行中; 不启动并发导出")
+        try:
+            return self._export(projection_path=projection_path, selection_path=selection_path,
+                                overwrite=overwrite, selection_mode=selection_mode,
+                                expected_document_token=expected_document_token)
+        except BaseException as error:
+            try:
+                _release_failure_frames(error)
+            except BaseException:
+                # Last-resort diagnostic preservation (e.g. allocation failure
+                # in the graph walk), not the normal per-frame cleanup path.
+                pass
+            raise
+        finally:
+            _EXPORT_LOCK.release()
+
+    def _export(self, *, projection_path, selection_path, overwrite,
+                selection_mode, expected_document_token):
         if selection_mode not in ("selection", "full_canvas"):
             raise SnapshotError("selection_mode 仅支持 selection/full_canvas")
         requested = {}
@@ -308,7 +452,7 @@ class SnapshotService:
         if doc.colorProfile() != SUPPORTED_PROFILE:
             raise SnapshotError("不支持的色彩配置; 仅支持 {0}".format(SUPPORTED_PROFILE))
         width, height = doc.width(), doc.height()
-        _size(width, height)
+        budget = _export_budget(width, height, paths)
         token = self.identities.token(doc, expected_document_token)
         epoch = self.identities.epoch
         # No document/node/selection setters, save, or event-loop pumping.
@@ -324,6 +468,7 @@ class SnapshotService:
             details["projection"] = {"source": "Document.pixelData", "source_layout": "BGRA8",
                                      "source_sha256": _digest(bgra), "pixel_layout": "RGBA8",
                                      "alpha": "straight; preserved", "color_profile": SUPPORTED_PROFILE}
+            del bgra
         if "selection" in paths:
             if selection_mode == "full_canvas":
                 mask = b"\xff" * (width * height)
@@ -356,6 +501,8 @@ class SnapshotService:
         outputs = []
         for kind, raw in captured.items():
             png = encode_png(raw, width, height, 4 if kind == "projection" else 1)
+            if len(png) > budget["png_byte_limits"][kind]:
+                raise SnapshotError("PNG 编码输出超预算; 未发布")
             details[kind].update(pixel_sha256=_digest(raw), pixel_bytes=len(raw),
                                  path=paths[kind].decode("utf-8"), file_bytes=len(png), file_sha256=_digest(png))
             outputs.append((paths[kind], png))
@@ -366,6 +513,7 @@ class SnapshotService:
                 "token_lifecycle_runtime_verified": False,
                 "paired": paired, "capture_scope": "one-main-thread-callback" if paired else "single-export-only",
                 "width": width, "height": height, "origin": {"x": 0, "y": 0},
+                "resource_budget": budget,
                 "sampled_at": sampled_at, "sample_started_monotonic_ns": started_ns,
                 "sample_finished_monotonic_ns": ended_ns,
                 "projection_refresh": "waitForDone/refreshProjection/waitForDone", **details}

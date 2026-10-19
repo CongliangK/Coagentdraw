@@ -1,6 +1,7 @@
 """CAD-14 deterministic placement math / RGBA byte mapping; no Qt or Krita imports."""
 from fractions import Fraction
 import os
+import hashlib
 import stat
 import struct
 import time
@@ -222,7 +223,7 @@ def _fs_bytes(path):
 
 
 def prepare_png(path, canvas_width, canvas_height, mode=None, offset_x=0,
-                offset_y=0, fit_canvas=None, *, budget=None):
+                offset_y=0, fit_canvas=None, *, budget=None, expected_source_sha256=None):
     """Read one bounded regular-file snapshot; no path-based Qt second read."""
     budget = budget or PreprocessBudget()
     budget.check("PNG 打开前")
@@ -248,6 +249,10 @@ def prepare_png(path, canvas_width, canvas_height, mode=None, offset_x=0,
                     encoded[:33] != header):
                 raise PlacementError("PNG 文件在预检读取期间发生变化")
         budget.check("PNG 文件读取后")
+        source_sha256 = hashlib.sha256(encoded).hexdigest()
+        if expected_source_sha256 is not None and source_sha256 != expected_source_sha256:
+            raise PlacementError("PNG 来源摘要改变；拒绝创建图层")
+        mapping["source_sha256"] = source_sha256
         return _png_snapshot(encoded, budget), mapping
     except OSError as exc:
         raise PlacementError("PNG 读取失败: {0}: {1}".format(path, exc.strerror or exc)) from exc
