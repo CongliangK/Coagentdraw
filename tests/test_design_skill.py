@@ -200,17 +200,72 @@ class DesignSkillBundleTests(unittest.TestCase):
                      "多项核心要素可以协同承载同一核心命题", "允许反馈后推翻或重构"]:
             self.assertIn(term, skill)
 
-    def test_shape_language_precedes_concrete_components(self):
+    def test_shape_language_guides_collage_without_becoming_an_entry_gate(self):
+        # 2026-10-19: anchor-led collage replaces the old geometry-first order.
+        # Keep the shape vocabulary, structure dependency and identity checks.
         text, _ = self.phase_one_tables()
-        sequence = "主形与辅形 → 整身剪影与主体构成 → 依附结构 → 表面细节"
-        self.assertIn(sequence, text)
-        self.assertLess(text.index(sequence), text.index("核心是一组"))
-        for term in ["圆、三角、方形", "方向、比例、分布", "轮廓节奏",
-                     "再选择身体、服装与装备实现这些大形", "情绪倾向结合重心、曲直与语境判断"]:
+        for term in ["形状语言用于试拼中的分析与调整", "当前锚点可以直接带入检索和拼贴",
+                     "不必先完成整卡、抽象几何方案或独立剪影",
+                     "整身剪影与主体构成 → 依附结构 → 表面细节",
+                     "圆、三角、方形", "方向、比例、分布", "轮廓节奏",
+                     "情绪倾向结合重心、曲直与语境判断"]:
             self.assertIn(term, text)
         skill = (DESIGN / "SKILL.md").read_text(encoding="utf-8")
-        self.assertLess(skill.index("先讨论形状语言"), skill.index("再提出可讨论的整身粗方案"))
-        self.assertIn("不把几何形状机械等同于人格", skill)
+        for term in ["有锚点就能进入试拼", "形状语言用于分析与调整",
+                     "不把抽象几何讨论作为找图的前置", "剪影是轮廓检查手段",
+                     "不把几何形状机械等同于人格"]:
+            self.assertIn(term, skill)
+        for document in [ROOT / "AGENTS.md", DESIGN / "README.md", DESIGN / "SKILL.md",
+                         DESIGN / "执行手册/README.md", DESIGN / "执行手册/01_文本创作起点.md",
+                         DESIGN / "Krita中枢创作流程_正式执行规范.md"]:
+            with self.subTest(document=document.name):
+                self.assertNotIn("形状语言先行", document.read_text(encoding="utf-8"))
+
+    def test_character_pilot_contract_has_the_ordered_end_to_end_route(self):
+        text = (DESIGN / "Krita中枢创作流程_正式执行规范.md").read_text(encoding="utf-8")
+        self.assertIn(
+            "当前设计锚点 → 通用搜索找角色 → 按优先级找对应三视图/设定资料 → "
+            "当前画布试拼大型与协调性 → 保留、调整或放弃 → 重构原创线稿 → 上色 → "
+            "本角色正侧背设定核对", text)
+        for term in ["仍待真实创作验证的流程假设", "不宣称行业已证明或工具已实现",
+                     "本次只调整角色设计", "独立插画仍沿用 07/08",
+                     "不强迫重填整卡、另造人物或先无参考手画剪影",
+                     "不建设巨型素材库作为前置"]:
+            self.assertIn(term, text)
+
+    def test_research_distinguishes_discovery_material_fitness_and_attempts(self):
+        text = (DESIGN / "执行手册/02_联想与前期调研.md").read_text(encoding="utf-8")
+        self.assertLess(text.index("**用通用搜索找角色。**"), text.index("**按优先级找角色资料。**"))
+        self.assertLess(text.index("**按优先级找角色资料。**"), text.index("**把可用资料交给当前画布。**"))
+        for term in ["性别仅在已知且相关时附加，未指定即不限", "约束可以没有",
+                     "优先三视图", "角度和姿态", "遮挡", "透视", "降级建议",
+                     "已找到、已取得、已入画布、已试拼是不同状态",
+                     "| 尝试与反馈 |", "保留/调整/放弃＋理由", "未知写 `unknown`",
+                     "用途和授权状态", "04/05引用同一条尝试", "原型阶段允许拆件试拼"]:
+            self.assertIn(term, text)
+        self.assertEqual(text.count("| 项目 | 填写提示 | 填写内容 |"), 1)
+
+    def test_collage_hands_off_to_real_redraw_and_editable_color(self):
+        exploration = (DESIGN / "执行手册/04_角色视觉探索.md").read_text(encoding="utf-8")
+        resolution = (DESIGN / "执行手册/05_角色方案收敛.md").read_text(encoding="utf-8")
+        for term in ["拼贴原型 → 结构线稿 → 基础色", "先在角色上试大型与协调性",
+                     "拆件、移动、缩放、旋转、扭曲或液化", "剪影是轮廓检查手段",
+                     "原型成立后重构线稿，再试基础色", "连接、厚度、遮挡",
+                     "当前插件没有通用笔刷/变形/滤镜接口", "未画/未测不能标完成"]:
+            self.assertIn(term, exploration)
+        for term in ["重构原创线稿 → 上基础色", "引用02同一尝试记录",
+                     "描边、滤镜结果或单张扁平生成图", "实际有效层/蒙版",
+                     "保存重开", "同尺度前后与全图复看", "至少一次实际修订"]:
+            self.assertIn(term, resolution)
+
+    def test_reference_turnarounds_and_local_research_do_not_claim_delivery(self):
+        turnaround = (DESIGN / "执行手册/06_三视图设定与核对.md").read_text(encoding="utf-8")
+        research = (ROOT / "docs/development/factual_research.md").read_text(encoding="utf-8")
+        self.assertIn("参考角色三视图只是前端材料", turnaround)
+        self.assertIn("当前原创角色的正侧背", turnaround)
+        self.assertIn("不能以参考三视图已找到、导入或拼好作为本阶段完成", turnaround)
+        self.assertIn("不实现在线角色发现、搜图、资料取得或画布试拼", research)
+        self.assertIn("本地 JSON 检索", research)
 
     def test_agents_and_readme_link_to_skill(self):
         for name in ["AGENTS.md", "README.md"]:
