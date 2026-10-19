@@ -51,6 +51,18 @@
 | [design/](design/) | 设计工作流文档：[现行正式执行规范](<design/Krita中枢创作流程_正式执行规范.md>)、[调研报告](design/调研报告/README.md)、[八阶段执行手册](design/执行手册/README.md)（现行八阶段一体简表） |
 | [comfyui/](comfyui/) | ComfyUI 工作流（Qwen-Image-2.1，API 格式）与依赖模型说明 |
 
+## AI 创作技能入口
+
+[design 目录](<design/README.md>)同时作为 **`coagentdraw-design`** 技能包：[SKILL.md](<design/SKILL.md>)负责触发、八阶段按需加载、原表格执行和交付前自检，现有规范与手册仍是唯一内容源，不另复制流程。
+
+在仓库根执行：
+
+```bash
+bash design/scripts/install_skill.sh
+```
+
+将整个 `design` 软链接到 `~/.agents/skills/coagentdraw-design`；同目标重复安装为空操作，遇到其他同名项拒绝覆盖。脚本不安装 Krita 插件、不重启宿主、不接触创作资料。宿主未发现时重新扫描技能或开启新会话；没有技能调用能力时直接读入口及当前阶段手册。详细边界见[技能包说明](<design/README.md>)。
+
 ## 许可证
 
 | 内容 | 许可证 |
