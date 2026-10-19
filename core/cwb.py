@@ -114,8 +114,21 @@ def _opacity_arg(value):
 
 
 def add_stage_parser(sub):
-    parser = sub.add_parser("stage", help="八阶段组预设（独立身份 sidecar；不修改项目状态）")
+    parser = sub.add_parser("stage", help="阶段交接检查/项目导航，以及独立 sidecar 图层组预设")
     commands = parser.add_subparsers(dest="stage_cmd", required=True)
+    for command in ("check", "advance"):
+        p = commands.add_parser(command, help="离线检查项目交接" if command == "check" else "离线更新关注阶段；不自动判完成")
+        p.add_argument("root", help="含 project_state.json 的项目目录；不是 stage sidecar")
+        p.add_argument("--intent", choices=("handoff", "detail-render", "structural-change"), default="handoff",
+                       help="显式声明本次操作意图；不自动检测或执行模型/画布操作")
+        if command == "check":
+            p.add_argument("--number", type=int, help="检查此阶段，默认当前阶段；未定义阶段报告未配置")
+            p.add_argument("--strict", action="store_true", help="有警告/未配置时退出2；默认只报告警告")
+        else:
+            p.add_argument("--to", type=int, help="默认下一阶段；允许明确回退，跳阶段须理由override")
+            p.add_argument("--override", metavar="理由", help="明确理由后跳过导航警告；不能伪造completed或艺术批准")
+            p.add_argument("--note", default="", help="本次交接/回退备注")
+            p.add_argument("--expect-revision", type=int, help="拒绝基于过期状态的写入")
     for command in ("setup", "import-diagnostic", "status"):
         p = commands.add_parser(command)
         p.add_argument("--state", required=True, help="独立 *.cwb-stage.json 文件；保留并备份")
@@ -332,8 +345,12 @@ def main(argv=None):
         from cwb_compare import run as run_compare
         run_compare(a)
     elif a.cmd == "stage":
-        from cwb_stage import run as run_stage
-        run_stage(a, http, Krita)
+        if a.stage_cmd in ("check", "advance"):
+            from cwb_gatekeeper import run as run_gatekeeper
+            run_gatekeeper(a)
+        else:
+            from cwb_stage import run as run_stage
+            run_stage(a, http, Krita)
     elif a.cmd == "project":
         from cwb_project import run as run_project
         run_project(a)

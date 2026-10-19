@@ -69,6 +69,8 @@ python3 core/cwb.py project decision /项目 asset <资产UUID> approve \
 
 ## 阶段完成与必要成果
 
+`python3 core/cwb.py stage check /项目` 聚合只读交接缺项；`stage advance /项目` 检查后导航，有警告可给明确理由override，支持回退。它不自动判completed、不替作者确认艺术质量；具体警告、退出码、历史及自动事件未接线边界见 [CAD-20阶段交接检查](../docs/development/cad20_gatekeeper.md)。
+
 状态为 `pending/in_progress/awaiting_review/completed`。跳转/回退不自动完成其他阶段。`completed` 必须引用本阶段有效的 stage 批准；该批准需非空人类来源与必要成果，且引用文件未变。艺术判断仍由作者负责，不由 CI 或 role 名字证明。
 
 | 阶段 | 最低已登记成果 |
