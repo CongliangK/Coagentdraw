@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>参考图库</title>
+  <link rel="stylesheet" href="/style.css">
+  <script src="/app.js" defer></script>
+</head>
+<body>
+  <header>
+    <p class="eyebrow">COAGENTDRAW / VISUAL REFERENCES</p>
+    <h1 id="title">参考图库</h1>
+    <p id="description">正在读取本地资料集…</p>
+    <div class="stats" id="stats"></div>
+  </header>
+  <main>
+    <section class="controls" aria-label="筛选资料">
+      <div class="filters">
+        <input id="query" type="search" placeholder="搜索标题、设计意义、来源或编号…" aria-label="搜索参考">
+        <select id="scope" aria-label="浏览范围">
+          <option value="main">本轮资料</option>
+          <option value="recommended">优先推荐</option>
+          <option value="chosen">试拼清单</option>
+          <option value="all">全部资料</option>
+          <option value="parked">旁支暂存</option>
+        </select>
+        <select id="group" aria-label="资料分组"><option value="">全部分组</option></select>
+        <select id="material" aria-label="素材类型"><option value="">全部素材类型</option></select>
+        <select id="ratio" aria-label="长宽比">
+          <option value="">全部长宽比</option>
+          <option value="portrait">竖幅（宽/高 &lt; 0.9）</option>
+          <option value="square">近方形（0.9–1.1）</option>
+          <option value="landscape">横幅（宽/高 &gt; 1.1）</option>
+        </select>
+      </div>
+      <div id="tags" class="tags" aria-label="标签筛选"></div>
+      <div class="toolbar">
+        <span id="count" role="status"></span>
+        <button id="export" disabled>导出试拼清单（0）</button>
+        <button id="reload">重新读取资料集</button>
+      </div>
+    </section>
+    <p class="hint">先在网页比较方向，再将选中的少量素材带入 Krita。点击图片放大；勾选仅加入试拼清单，不代表设计已采纳或已经导入画布。</p>
+    <p id="error" role="alert" hidden></p>
+    <div id="grid" class="grid"></div>
+  </main>
+  <footer>图片与标注保存在本地外部数据集中，网页按需读取。原图保持原尺寸；来源与使用限制见各图详情。修改标注后可重新读取。</footer>
+  <dialog id="viewer" aria-labelledby="vtitle">
+    <div class="dialog-head"><h2 id="vtitle"></h2><button id="close" aria-label="关闭大图">关闭 ×</button></div>
+    <img id="vimg" alt="">
+    <dl id="details"></dl>
+    <div class="dialog-links"><a id="original" target="_blank" rel="noopener">打开原图</a><a id="source" target="_blank" rel="noopener noreferrer">来源页面 ↗</a></div>
+  </dialog>
+</body>
+</html>

@@ -228,6 +228,37 @@ def add_candidates_parser(sub):
     p.add_argument("--parent-ref", help="未验证的目标组 ID；不连接 Krita")
 
 
+def add_references_parser(sub):
+    parser = sub.add_parser('references', help='外部JSON资料集与本地Web图库；先筛选，选中后再导入Krita')
+    commands = parser.add_subparsers(dest='references_cmd', required=True)
+    p = commands.add_parser('init', help='建立独立references.json，不覆盖既有数据')
+    p.add_argument('root'); p.add_argument('--title', required=True); p.add_argument('--description', default='')
+    for command in ('add', 'annotate', 'refresh', 'validate', 'serve', 'shortlist'):
+        p = commands.add_parser(command)
+        p.add_argument('root', help='资料目录，含references.json和相对路径图片')
+        if command == 'add':
+            p.add_argument('file', help='目录内原图的相对路径，不复制、不下载'); p.add_argument('--id', required=True)
+        if command in ('annotate', 'refresh'):
+            p.add_argument('id')
+        if command in ('add', 'annotate'):
+            for field in ('title', 'meaning', 'source-url', 'creator', 'rights'):
+                p.add_argument('--' + field, required=command == 'add')
+            p.add_argument('--image-url')
+            p.add_argument('--retrieved-at', default=None)
+            p.add_argument('--tag', action='append', help='重复传入；annotate时替换全部标签')
+            p.add_argument('--clear-tags', action='store_true')
+            p.add_argument('--group', default='未分组' if command == 'add' else None)
+            p.add_argument('--material', default='未分类' if command == 'add' else None)
+            p.add_argument('--priority', choices=('normal', 'recommended', 'parked'), default='normal' if command == 'add' else None)
+        if command in ('add', 'annotate', 'refresh'):
+            p.add_argument('--expect-sha256', help='拒绝覆盖基于旧数据集的标注')
+        if command == 'serve':
+            p.add_argument('--port', type=int, default=0, help='仅127.0.0.1；默认自动选择空闲端口')
+        if command == 'shortlist':
+            p.add_argument('--id', action='append', required=True, help='导出试拼候选，不表示已导入或批准')
+            p.add_argument('--output', required=True, help='写入新JSON文件，不覆盖现有文件')
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--version", action="version", version="cwb: project schema2; workflow krita-character-illustration-v1; stage sidecar2")
@@ -290,6 +321,7 @@ def main(argv=None):
     p.add_argument("record", help="UUID 运行目录内的 run.json")
     p.add_argument("--timeout", type=float, default=1800)
 
+    add_references_parser(sub)
     add_project_parser(sub)
     add_stage_parser(sub)
     add_compare_parser(sub)
@@ -307,7 +339,10 @@ def main(argv=None):
     p.add_argument("--zip", action="store_true", help="仅生成本地 ZIP")
 
     a = ap.parse_args(argv)
-    if a.cmd == "candidates":
+    if a.cmd == "references":
+        from cwb_references import run as run_references
+        run_references(a)
+    elif a.cmd == "candidates":
         from cwb_candidates import run as run_candidates
         run_candidates(a)
     elif a.cmd == "style":

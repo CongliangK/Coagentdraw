@@ -201,6 +201,20 @@ def set_stage(data, stage, note, status="in_progress", approval=None):
                                       "previous_target_status": old_status, "status": status})
 
 
+def verify_research_gallery(root, path):
+    """A web research checkpoint includes its dataset and local source images."""
+    from cwb_references import CATALOG, load
+    try:
+        target = asset_path(root, path)
+        if target.name != CATALOG:
+            raise ProjectError("Web资料成果须引用references.json")
+        catalog, _ = load(target.parent, verify=True)
+        if not catalog['records']:
+            raise ProjectError("Web资料成果不可为空图库")
+    except (OSError, ValueError) as exc:
+        raise ProjectError("Web资料集需复核：" + str(exc)) from exc
+
+
 def record(root, data, path, stage, category, note, *, object_id=None, version=None,
            role="unspecified", document_id=None, kind="working", group_marker=None,
            region=None, preview=None):
@@ -208,6 +222,10 @@ def record(root, data, path, stage, category, note, *, object_id=None, version=N
     stage = stage or data["current_stage"]
     if not integer(stage, 1, 8) or category not in ("temporary", "final"):
         raise ProjectError("无效成果阶段或类别")
+    if role == "research_gallery":
+        if stage != 2 or document_id is not None:
+            raise ProjectError("research_gallery仅用于阶段02的独立Web资料集")
+        verify_research_gallery(root, path)
     if document_id is not None:
         doc = lookup(data["documents"], document_id)
         if stage not in DOCUMENT_STAGES[doc["role"]]:
@@ -264,6 +282,8 @@ def inspect(root):
         try:
             digest, size = fingerprint(root, asset["path"])
             check["status"] = "ok" if (digest, size) == (asset["sha256"], asset["size"]) else "changed"
+            if asset["role"] == "research_gallery" and check["status"] == "ok":
+                verify_research_gallery(root, asset["path"])
         except FileNotFoundError:
             check["status"] = "missing"
         except (OSError, ProjectError) as exc:
@@ -536,13 +556,17 @@ def check_outcomes(data, number, outcomes):
         raise ProjectError("文本起点阶段需起点成果")
     if number == 3 and not ideas:
         raise ProjectError("创意选择需创意成果引用")
-    if number == 2 and not {"research_materials", "research_board"}.intersection(a["role"] for a in assets):
-        raise ProjectError("缺少阶段必要成果角色: research_materials 或 research_board")
+    if number == 2 and not {"research_materials", "research_board", "research_gallery"}.intersection(a["role"] for a in assets):
+        raise ProjectError("缺少阶段必要成果角色: research_materials、research_board 或 research_gallery")
     if not REQUIRED_ROLES.get(number, set()).issubset({a["role"] for a in assets}):
         raise ProjectError("缺少阶段必要成果角色: " + str(sorted(REQUIRED_ROLES.get(number, set()))))
     for asset in assets:
         if asset["workflow_id"] != WORKFLOW or asset["stage"] != number or asset["kind"] != "checkpoint":
             raise ProjectError("阶段批准只接受本流程本阶段的不变确认快照")
+        if asset["role"] == "research_gallery":
+            if number != 2 or asset["document_id"] is not None or asset["preview"] is None:
+                raise ProjectError("Web资料确认快照需独立数据集与同快照目录中的可视预览")
+            continue
         if asset["role"] not in ("delivery_manifest", "editable_source") and (asset["document_id"] is None or (asset["region"] is None and asset["group_marker"] is None)):
             raise ProjectError("视觉成果需文档与持久组标记或画布区域")
 
@@ -586,6 +610,8 @@ def verify_outcome(root, data, ref):
     if ref["kind"] == "asset":
         if fingerprint(root, item["path"]) != (ref["sha256"], item["size"]):
             raise ProjectError("确认快照内容已变化，需复核")
+        if item["role"] == "research_gallery":
+            verify_research_gallery(root, item["path"])
         if item["preview"] is not None:
             p = item["preview"]
             if fingerprint(root, p["path"]) != (p["sha256"], p["size"]):

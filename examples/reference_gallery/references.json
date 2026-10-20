@@ -1,0 +1,92 @@
+{
+  "schema": "cwb-reference-gallery-v1",
+  "id": "reference-gallery-demo",
+  "title": "参考图库 · 教学示例",
+  "description": "外部JSON数据驱动的示例图库。图片为原创几何示意，仅展示筛选、尺寸与来源信息，不是实际角色设计。",
+  "records": [
+    {
+      "id": "cape-demo",
+      "title": "披衣轮廓示意",
+      "file": "images/silhouette.png",
+      "meaning": "教学合成图：演示整体轮廓与透明像素标签，不是角色方案。",
+      "tags": [
+        "轮廓",
+        "外披"
+      ],
+      "group": "教学示例",
+      "material": "透明示意图",
+      "priority": "recommended",
+      "source": {
+        "url": "unknown",
+        "creator": "Coagentdraw 工具教学合成图",
+        "rights": "CC0-1.0；本仓库原创合成示例",
+        "retrieved_at": "2026-10-20"
+      },
+      "image": {
+        "width": 240,
+        "height": 320,
+        "aspect_ratio": 0.75,
+        "has_alpha": true,
+        "mime": "image/png",
+        "bytes": 1779,
+        "sha256": "c0b4d31c6151522577420fbd74fd91bfd6cf8f297346fde4588201dc1cf9068e"
+      }
+    },
+    {
+      "id": "staff-demo",
+      "title": "长柄与环形前端示意",
+      "file": "images/staff.png",
+      "meaning": "教学合成图：演示长柄与大前端的比例，以及横幅筛选。",
+      "tags": [
+        "长柄",
+        "装备"
+      ],
+      "group": "教学示例",
+      "material": "结构示意图",
+      "priority": "normal",
+      "source": {
+        "url": "unknown",
+        "creator": "Coagentdraw 工具教学合成图",
+        "rights": "CC0-1.0；本仓库原创合成示例",
+        "retrieved_at": "2026-10-20"
+      },
+      "image": {
+        "width": 360,
+        "height": 180,
+        "aspect_ratio": 2.0,
+        "has_alpha": false,
+        "mime": "image/png",
+        "bytes": 1302,
+        "sha256": "f94b364db2a7efe37820c4a3c991ad95cfeb5a74a9b2f33cdbb33b17f88a70a1"
+      }
+    },
+    {
+      "id": "ring-demo",
+      "title": "共鸣环架示意",
+      "file": "images/rings.png",
+      "meaning": "教学合成图：演示环架、中心轴和方形图片筛选。",
+      "tags": [
+        "装备",
+        "环架"
+      ],
+      "group": "教学示例",
+      "material": "结构示意图",
+      "priority": "normal",
+      "source": {
+        "url": "unknown",
+        "creator": "Coagentdraw 工具教学合成图",
+        "rights": "CC0-1.0；本仓库原创合成示例",
+        "retrieved_at": "2026-10-20"
+      },
+      "image": {
+        "width": 240,
+        "height": 240,
+        "aspect_ratio": 1.0,
+        "has_alpha": false,
+        "mime": "image/png",
+        "bytes": 1853,
+        "sha256": "0a9f32cb932d7f359076b700756d62553cd023aeb74304f02781b2fd54c6d9a3"
+      }
+    }
+  ]
+}
