@@ -1,4 +1,4 @@
-"""CAD-23: offline PNG comparison and append-only decisions; never calls Krita.
+"""Offline PNG comparison and append-only decisions; never calls Krita.
 
 Pillow is optional and imported only by create(). All disk access is anchored
 with dir_fd/O_NOFOLLOW (Linux); no symlink traversal or overwriting outputs.
@@ -20,7 +20,7 @@ SCHEMA = "cwb-compare-offline-v1"
 MAX_BYTES = 128 * 1024 * 1024
 MAX_PIXELS = 16_000_000
 STATES = {"accept": "accepted", "reject": "rejected", "hide": "hidden", "withdraw": "pending"}
-NOTICE = "仅离线记录；未改变 Krita 图层/投影，未接入 #25，未完成 #17 或真实恢复验收。"
+NOTICE = "仅离线记录；未改变 Krita 图层/投影，不执行画改或恢复原画面。"
 
 
 def _digest(data):

@@ -1,4 +1,4 @@
-"""CAD-24 offline review contracts. No backend, network, Krita or project writes.
+"""Offline review contracts. No backend, network, Krita or project writes.
 
 Reuse the existing no-follow bounded file primitives; do not invoke compare's
 commands/rendering. Pillow is imported only when PNG validation is needed.
@@ -43,7 +43,7 @@ CONTRACT = {
     "epistemic_limit": "All evidence/claims unverified; subjective taste is not an empirically proven defect",
 }
 NOTICE = ("仅本地接口准备/手工反馈导入；未调用或验证审评后端，未验证艺术效果，"
-          "未修改作品/生成画改提示，未接入 #18/#19/#25，不能关闭 #24。")
+          "不修改作品、不生成画改提示，不读写项目状态或其他决定记录。")
 
 
 def _keys(value, required, optional=()):
@@ -238,7 +238,7 @@ def prepare(original, silhouette, grayscale, context, output):
     dimensions = [_png_dimensions(c[1]) for c in captures]
     if any(d != dimensions[0] for d in dimensions):
         raise ValueError("原图/剪影/灰阶尺寸必须完全相同；不会生成诊断图或映射坐标")
-    template_path = str(Path(__file__).resolve().parent.parent / "docs/development/cad24_review_prompt.md")
+    template_path = str(Path(__file__).resolve().parent.parent / "docs/tools/review_prompt.md")
     template_capture = _capture_small(template_path, MAX_JSON)
     request = dict(schema=SCHEMA, status="prepared_not_executed", request_id=str(uuid.uuid4()),
                    coordinate_system=COORDINATES, context=intent, feedback_contract=CONTRACT,

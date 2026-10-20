@@ -1,4 +1,4 @@
-# CAD-13：整画布投影与选区快照（离线交付）
+# 整画布投影与选区快照（离线交付）
 
 ## 状态和边界
 
@@ -57,7 +57,7 @@ python3 core/cwb.py snapshot /tmp/projection.png /tmp/selection.png --overwrite 
 ## 像素、色彩与只读约束
 
 1. 只接受根节点 `RGBA/U8`，并明确收窄到 `Document.colorProfile() == sRGB-elle-V2-srgbtrc.icc`。CMYK、U16/F16 等和其他 ICC（包括线性 sRGB / 广色域）均拒绝，不静默转换或丢弃色彩解释。后续扩大白名单需要独立数值证据。
-2. 投影调用 `Document.pixelData(0, 0, width, height)`，不读取任何节点的 `bounds()` / `pixelData()`，不复用旧的 `/layer/png`。要求长度严格为 `width*height*4`。
+2. 投影调用 `Document.pixelData(0, 0, width, height)`，不读取任何节点的 `bounds()` / `pixelData()`，不调用图层像素导出 `/layer/png`。要求长度严格为 `width*height*4`。
 3. `Document.pixelData` 返回 **BGRA 字节序**（Krita 原生 ARGB 内存布局），投影编码前交换 B/R。2026-10 实机确认（Krita 6.0.4 AppImage）：把 RGBA 字节直写 `setPixelData` 会在画布呈现红蓝互换。**字节序验证必须使用非对称彩色样本并对照画布外观**。PNG 为 8-bit straight RGBA（color type 6），保留半透明 Alpha 和透明像素的 RGB；不自行预乘/反预乘。PNG **不带 sRGB/gAMA/iCCP 色彩元数据 chunk**：像素已在上游收窄为 sRGB profile，未标记 PNG 按惯例即按 sRGB 解读；且实测部分智能体视觉解码管线遇到显式 sRGB chunk 会把整帧误渲染为黑帧（2026-10 离线对照确认），因此不写入。
 4. 选区只用 `Selection.pixelData(0, 0, width, height)`，严格检查长度 `width*height`，不通过 QColor、QImage RGBA 或 bounds 重构蒙版；0、128、255 和所有羽化值原样保存。
 5. 蒙版 PNG 是 8-bit **单通道灰度**（color type 0），**没有 Alpha，也不含 tRNS/gamma/色彩配置**。`M=0` 未选，`M=255` 全选，`M=128` 为 128/255 覆盖，不反转、不阈值化、不做 gamma。渲染器将灰度图显示为不透明属于预期。未来消费者必须按灰度通道读取；不能直接假定 ComfyUI `LoadImage.MASK`（通常由 Alpha 得到）就是这份蒙版。
@@ -79,8 +79,8 @@ PNG 编码全部使用 Python 标准库，按行无损编码，无 Qt 的 `QImag
 
 - 当前可证明：源代码没有 wrapper/文件名身份替代；离线测试模拟关闭、同 UUID 重开、创建其他文档、不同 wrapper、重复 UUID、服务会话更换、notifier 缺失/停用时，按上述规则失效/拒绝。
 - 当前 **不能证明**：目标 Krita 6 上所有 GUI 关闭/重开路径确实投递这些信号；打开 `.kra` 的 root UUID 行为；Qt 信号线程/生命周期；投影读取期间的后台任务可见性。没有伪造实机证据或从替身推导这些保证。
-- 缺少必需生命周期 API、采样时发现 notifier 停用、缺失/冲突 UUID 时 fail closed。其他插件在两次检查之间停用并重新启用 notifier、从而丢失关闭事件，目前无法识别；若关闭/重开同 UUID 且信号未投递，则本方案无法区分，应视作尚未满足强身份门槛。**不能把现在的 token 作为 #17 安全回填凭证。**
-- 在真实生命周期门槛通过前保留 `token_lifecycle_runtime_verified = false`；不是可由请求者改成 true 的参数。后续 #17 还需同时验证尺寸/原点、投影及选区的规范像素摘要、明确用户接受与冲突处理；本任务未实现回填，也没有给出内容未改的保证。
+- 缺少必需生命周期 API、采样时发现 notifier 停用、缺失/冲突 UUID 时 fail closed。其他插件在两次检查之间停用并重新启用 notifier、从而丢失关闭事件，目前无法识别；若关闭/重开同 UUID 且信号未投递，则本方案无法区分，应视作尚未满足强身份门槛。**不能把现在的 token 作为安全回填凭证。**
+- 在真实生命周期门槛通过前保留 `token_lifecycle_runtime_verified = false`；不是可由请求者改成 true 的参数。安全回填还需尺寸/原点、投影及选区像素摘要、明确用户接受与冲突处理的同次服务端核对；当前未实现回填，也不保证内容未改。
 
 ## 输出覆盖、失败与超时
 
@@ -93,7 +93,7 @@ PNG 编码全部使用 Python 标准库，按行无损编码，无 Qt 的 `QImag
 
 ## 验收映射和实机待验清单
 
-| 要求 | 本次离线证据 | 实机状态 |
+| 要求 | 离线证据 | 实机状态 |
 |---|---|---|
 | API/CLI、主线程一次配对、127.0.0.1 | 路由/bridge 调用数、必填字段、CLI payload/帮助零网络零缓存测试 | 未启动/安装插件 |
 | Document 整画布，不用节点 bounds | 替身 root 没有 bounds/pixelData，断言文档读取 (0,0,w,h) | Krita 可见合成与隐藏/组层需核对 |
@@ -112,7 +112,7 @@ PNG 编码全部使用 Python 标准库，按行无损编码，无 Qt 的 `QImag
 3. 独立解码两个 PNG，核对尺寸/原点、投影与 GUI 合成、RGBA 四通道（特别 Alpha=128）、蒙版所有覆盖值与边界；验证刷新后像素已更新且作品 modified/undo 不变。
 4. 取消选区：默认失败；显式 full_canvas：全 255。测试不支持 profile/U16 拒绝。
 5. 记录 token，关闭再打开同一专用 `.kra`，旧 token 请求必须失败；测试标签页关闭、最后视图关闭、未保存文档关闭、重复打开同源文档。记录实际 notifier 事件、root UUID 与 token，不仅比较文件名。
-6. 在完成以上真实证据审阅前，不将本说明改成“实机通过”，不把 #13/#17 的完整用户画布验收写为完成。
+6. 在完成以上真实证据审阅前，不将本说明改成“实机通过”，不宣称完整用户画布或安全回填验收完成。
 
 ## 离线运行
 

@@ -1,4 +1,4 @@
-"""CAD-14 deterministic placement math / RGBA byte mapping; no Qt or Krita imports."""
+"""Deterministic placement math / RGBA byte mapping; no Qt or Krita imports."""
 from fractions import Fraction
 import os
 import stat
@@ -85,7 +85,7 @@ def resolve_mode(mode, offset_x, offset_y):
     if mode is None:
         mode = default_mode
     if not isinstance(mode, str) or mode not in MODES:
-        raise PlacementError("mode 仅支持 keep_size/fit_canvas/insert_at_offset；crop_at_bbox 尚未实现")
+        raise PlacementError("mode 仅支持 keep_size/fit_canvas/insert_at_offset")
     if mode != "insert_at_offset" and (x or y):
         raise PlacementError("非零 offset 仅用于 insert_at_offset；不与居中/原点行为混用")
     return mode, x, y

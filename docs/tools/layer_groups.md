@@ -1,9 +1,9 @@
-# CAD-11：图层组 API 与 CLI
+# 图层组 API 与 CLI
 
 ## 契约
 
 - `POST /layer/group`：必填 `name`；可选 `parent_id`、`above`。只创建 `groupLayer`，不移动/合并已有节点。返回 `id`、实际 `name`、`type`（Krita 返回 `grouplayer`）、`parent_id`。
-- `POST /layer/add`：必填 `png_path`、`name`；可选 `above`、`offset_x`、`offset_y`、`parent_id`、`mode`。只创建 `paintLayer`；返回原字段及 `parent_id`。
+- `POST /layer/add`：必填 `png_path`、`name`；可选 `above`、`offset_x`、`offset_y`、`parent_id`、`mode`。只创建 `paintLayer`；返回 `id/name/width/height/parent_id/placement`。
 - `parent_id` 省略或为 JSON `null` 时使用文档根容器；显式 ID 必须指向当前文档中的组。显式根 ID、paintLayer、其他类型均拒绝，空字符串不是默认根。
 - `above` 省略或为 `null` 时使用 Krita 默认插入位置；指定时必须是父级的**直接子节点**，且为 groupLayer/paintLayer/vectorLayer。不能跨组、不能指向父级自身或根。不根据 above 隐式推断父级。
 - 同级顺序按 Krita `childNodes()` 的从下到上顺序核对：新节点必须紧随 above。界面图层面板通常反向展示该列表。

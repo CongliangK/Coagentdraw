@@ -1,4 +1,4 @@
-"""CAD-11 离线替身测试: 不证明真实 Krita/Qt 图层树或 .kra 行为。"""
+"""离线替身测试: 不证明真实 Krita/Qt 图层树或 .kra 行为。"""
 import contextlib
 import importlib.util
 import io
@@ -61,7 +61,7 @@ krita = types.ModuleType('krita')
 krita.Krita = Mock()
 with patch.dict(sys.modules, {'PyQt6': types.ModuleType('PyQt6'),
                               'PyQt6.QtGui': qtgui, 'krita': krita}):
-    ops = load_module('_cad11_package.ops', ROOT / 'core/krita_cowork/ops.py')
+    ops = load_module('_layer_groups_package.ops', ROOT / 'core/krita_cowork/ops.py')
 
 
 class Node:
@@ -140,19 +140,19 @@ class Doc:
 
 class Operations(unittest.TestCase):
     def setUp(self):
-        package = types.ModuleType('_cad11_package')
+        package = types.ModuleType('_layer_groups_package')
         package.__path__ = [str(ROOT / 'core/krita_cowork')]
-        modules = patch.dict(sys.modules, {'_cad11_package': package})
+        modules = patch.dict(sys.modules, {'_layer_groups_package': package})
         modules.start()
         self.addCleanup(modules.stop)
         self.doc = Doc()
         self.active = patch.object(ops, '_active_doc', return_value=self.doc)
         self.active.start()
         self.addCleanup(self.active.stop)
-        # CAD-11 tests use a nonexistent input.png and a Qt image double. Keep
+        # layer_groups tests use a nonexistent input.png and a Qt image double. Keep
         # that one virtual path local to these tests; all real paths still run
-        # production preflight (CAD-14 separately tests malformed/resource PNGs).
-        placement = importlib.import_module('_cad11_package.placement')
+        # production preflight (placement separately tests malformed/resource PNGs).
+        placement = importlib.import_module('_layer_groups_package.placement')
         real_prepare = placement.prepare_png
         def prepare(path, *args, **kwargs):
             if path == os.path.abspath('input.png'):
@@ -299,7 +299,7 @@ class Client(unittest.TestCase):
                 self.assertEqual(http.call_args.args, (cwb.Krita + route, expected))
 
     def test_help_has_no_http_or_filesystem_side_effects(self):
-        with tempfile.TemporaryDirectory(prefix='cad11-help-') as tmp:
+        with tempfile.TemporaryDirectory(prefix='layer-groups-help-') as tmp:
             target = Path(tmp) / 'absent'
             for args in (['--help'], ['group', '--help'], ['add', '--help']):
                 with patch.object(cwb, 'http', side_effect=AssertionError('network')):
@@ -317,13 +317,13 @@ class Client(unittest.TestCase):
 
 class Routing(unittest.TestCase):
     def setUp(self):
-        package = types.ModuleType('_cad11_package')
+        package = types.ModuleType('_layer_groups_package')
         package.__path__ = []
-        bridge_module = types.ModuleType('_cad11_package.bridge_qt')
+        bridge_module = types.ModuleType('_layer_groups_package.bridge_qt')
         bridge_module.MainThreadBridge = Mock
-        with patch.dict(sys.modules, {'_cad11_package': package, '_cad11_package.ops': ops,
-                                      '_cad11_package.bridge_qt': bridge_module}):
-            self.server = load_module('_cad11_package.server', ROOT / 'core/krita_cowork/server.py')
+        with patch.dict(sys.modules, {'_layer_groups_package': package, '_layer_groups_package.ops': ops,
+                                      '_layer_groups_package.bridge_qt': bridge_module}):
+            self.server = load_module('_layer_groups_package.server', ROOT / 'core/krita_cowork/server.py')
         self.control = self.server.ControlServer(0)
         self.control.bridge.call.side_effect = lambda fn: fn()
         # 捕获真实 Handler,不打开监听 socket,也不运行后台线程。

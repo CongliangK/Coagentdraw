@@ -46,6 +46,8 @@
 | [core/](core/) | 内核：Krita 插件 `krita_cowork`、命令行客户端 `cwb.py`、安装脚本 |
 | [design/](design/) | 设计工作流文档：[现行正式执行规范](<design/Krita中枢创作流程_正式执行规范.md>)、[调研报告](design/调研报告/README.md)、[八阶段执行手册](design/执行手册/README.md)（现行八阶段一体简表） |
 | [comfyui/](comfyui/) | ComfyUI 工作流（Qwen-Image-2.1，API 格式）与依赖模型说明 |
+| [docs/tools/](docs/tools/) | 当前工具的参数契约、失败语义与验证边界 |
+| [tests/](tests/) | 离线回归与合成测试素材，不代表真实作品验收 |
 
 ## AI 创作技能入口
 
@@ -126,13 +128,13 @@ python3 core/cwb.py project status "项目/我的第一个设计"
 
 当前插件没有通用笔刷、变形或滤镜接口；手册中的相关画改由作者在 Krita GUI，或具备相应界面能力且获授权的助手执行。普通 edit 的场景草稿＋角色参考不是几何锁定；独立HQ局部编辑交互模板使用当前底画＋真实蒙版，没有额外独立角色/Pose/Depth输入，详见 [ComfyUI 说明](<comfyui/README.md>)。
 
-图层组与组内 PNG 导入的参数约束、CLI 示例及真实 Krita 验收步骤见 [CAD-11 图层组说明](docs/development/cad11_layer_groups.md)。
+图层组与组内 PNG 导入的参数约束、CLI 示例及真实 Krita 验收步骤见 [图层组说明](docs/tools/layer_groups.md)。
 
-`/layer/add` 的命名适配、严格整数坐标与确定性映射元数据见 [CAD-14 图像导入规则](<docs/development/cad14_placement.md>)。`fit_canvas` 只等比缩小、居中透明留白、不放大小图；`crop_at_bbox` 明确不支持。像素通道与实际落点本项尚未在真实 Qt/Krita 验证。
+`/layer/add` 的模式选择、严格整数坐标与确定性映射元数据见 [图像导入规则](<docs/tools/placement.md>)。`fit_canvas` 只等比缩小、居中透明留白、不放大小图；像素通道与实际落点本项尚未在真实 Qt/Krita 验证。
 
-图层属性契约、CLI 示例、部分写入语义与实机待验清单见 [CAD-12 图层属性说明](docs/development/cad12_layer_props.md)。`/layers` 增加 `alpha_locked`、`alpha_lock_supported`、`blending_mode`；混合模式画布效果尚未在本机验收。
+图层属性契约、CLI 示例、部分写入语义与实机待验清单见 [图层属性说明](docs/tools/layer_props.md)。`/layers` 返回 `alpha_locked`、`alpha_lock_supported`、`blending_mode`；混合模式画布效果尚未在本机验收。
 
-`cwb.py export`、`selection-png`、`snapshot` 的参数、RGBA/U8+sRGB 限制、蒙版灰度/Alpha、无选区与覆盖失败边界见 [CAD-13 快照契约](<docs/development/cad13_snapshot.md>)。仅配对入口可声明同回调捕获；token 的实机关闭/重开门槛尚待验证，当前不能作为安全回填凭证。
+`cwb.py export`、`selection-png`、`snapshot` 的参数、RGBA/U8+sRGB 限制、蒙版灰度/Alpha、无选区与覆盖失败边界见 [快照契约](<docs/tools/snapshot.md>)。仅配对入口可声明同回调捕获；token 的实机关闭/重开门槛尚待验证，当前不能作为安全回填凭证。
 
 ## cwb 用法
 
@@ -144,23 +146,23 @@ python3 core/cwb.py comfy-edit base.png "..." --image2 ref.png --add 编辑层
 python3 core/cwb.py save 作品.kra
 ```
 
-参数、显式工作流契约、运行快照和 `comfy-replay` 详见 [ComfyUI CLI 说明](comfyui/README.md#cli-参数与契约cad-10)。离线回归：`python3 -m unittest discover -s tests -v`；它不代表已验证真实 Krita/ComfyUI 生成。
+参数、显式工作流契约、运行快照和 `comfy-replay` 详见 [ComfyUI CLI 说明](comfyui/README.md#cli-参数与契约)。离线回归：`python3 -m unittest discover -s tests -v`；它不代表已验证真实 Krita/ComfyUI 生成。
 
 离线项目状态与成果索引：`python3 core/cwb.py project --help`，目录、修订冲突和恢复说明见 [项目状态 CLI](design/项目状态_CLI.md)。
 
-按文档角色建组：`python3 core/cwb.py stage --help`。首次setup指定 `--role ideation|character|turnaround|illustration`，仅支持现行工作流；同名不接管，需已保存文档与独立sidecar。身份、部分失败与重开限制见[阶段组织](<docs/development/cad21_stage.md>)。
+按文档角色建组：`python3 core/cwb.py stage --help`。首次setup指定 `--role ideation|character|turnaround|illustration`，仅支持现行工作流；同名不接管，需已保存文档与独立sidecar。身份、部分失败与重开限制见[阶段组织](<docs/tools/stage.md>)。
 
 其他工具按实际任务选用，`--help` 均离线、无服务访问或缓存创建：
 
 | 命令 | 当前能力与边界 | 详细契约 |
 |---|---|---|
-| `compare` | before/after PNG 同尺度比较与人工决定记录；不自动替换 Krita 主稿 | [比较](<docs/development/cad23_compare.md>) |
-| `layout` | 已有主图、正侧背与装备图排版，准备 PNG/SVG 人工导入请求；不生成三视图或核验一致性，矢量编辑与保存重开待实测 | [排版](<docs/development/cad28_layout.md>) |
-| `review` | 登记已有原图/剪影/灰阶，校验并导出用户提供的反馈；无已验证的模型审评后端 | [审评](<docs/development/cad24_review.md>) |
-| `candidates` | 待执行候选计划、现成透明黑 PNG 拼板、入选清单；不生成或分割图像，不导入 Krita | [候选](<docs/development/cad22_candidates.md>) |
-| `style` | 独立 sidecar 的风格 token、参考摘要、锁定记录及提示片段；不自动修改生成请求，不保证跨图一致性 | [风格](<docs/development/cad26_style.md>) |
-| `export-project` | 显式选定资产的安全导出与来源记录；不判断作品完成或 KRA 可编辑性 | [导出](<docs/development/cad30_export.md>) |
-| `python3 core/cwb_research.py` | 本地 JSON 来源计划、关键词检索与采用记录；不自动联网、解析 PDF 或核验来源 | [事实检索](<docs/development/factual_research.md>) |
+| `compare` | before/after PNG 同尺度比较与人工决定记录；不自动替换 Krita 主稿 | [比较](<docs/tools/compare.md>) |
+| `layout` | 已有主图、正侧背与装备图排版，准备 PNG/SVG 人工导入请求；不生成三视图或核验一致性，矢量编辑与保存重开待实测 | [排版](<docs/tools/layout.md>) |
+| `review` | 登记已有原图/剪影/灰阶，校验并导出用户提供的反馈；无已验证的模型审评后端 | [审评](<docs/tools/review.md>) |
+| `candidates` | 待执行候选计划、现成透明黑 PNG 拼板、入选清单；不生成或分割图像，不导入 Krita | [候选](<docs/tools/candidates.md>) |
+| `style` | 独立 sidecar 的风格 token、参考摘要、锁定记录及提示片段；不自动修改生成请求，不保证跨图一致性 | [风格](<docs/tools/style.md>) |
+| `export-project` | 显式选定资产的安全导出与来源记录；不判断作品完成或 KRA 可编辑性 | [导出](<docs/tools/export.md>) |
+| `python3 core/cwb_research.py` | 本地 JSON 来源计划、关键词检索与采用记录；不自动联网、解析 PDF 或核验来源 | [事实检索](<docs/tools/factual_research.md>) |
 
 候选拼板的教学素材与离线测试不构成真实创作验证，剪影也不是角色流程的起步门槛。事实检索只辅助[阶段02](<design/执行手册/02_联想与前期调研.md>)中的具体事实问题，不限制灵感池或代替 Krita 想象板。
 

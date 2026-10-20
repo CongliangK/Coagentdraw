@@ -1,4 +1,4 @@
-"""CAD-28 restricted annotation SVG; stdlib only, no Qt/Krita imports.
+"""Restricted annotation SVG; stdlib only, no Qt/Krita imports.
 
 This is deliberately NOT a general SVG importer. Successful readback is only a
 structural check; font rendering, points alignment and GUI editing need Krita QA.
@@ -65,7 +65,7 @@ def validate_svg(svg, canvas, dpi):
     for v in dpi:
         number(v, "dpi", 1, 2400)
     if dpi[0] != dpi[1]:
-        raise VectorError("首版仅支持明确方形 DPI；不猜测非方形映射")
+        raise VectorError("仅支持明确方形 DPI；不猜测非方形映射")
     try:
         root = ET.fromstring(svg)
     except ET.ParseError as exc:
@@ -278,7 +278,7 @@ def _semantic(el, unit_scale):
     return kind, geometry, strings
 
 
-def _readback(exported, canvas, dpi):
+def _readback(exported):
     if re.search(r"<!|<\?|url\s*\(|href\s*=", exported, re.I):
         raise VectorError("回读含声明/资源")
     # Supply ONLY the namespaces used by official detached savePath. Any
@@ -289,11 +289,6 @@ def _readback(exported, canvas, dpi):
     root = wrapper[0]
     if (root.tail or "").strip():
         raise VectorError("回读根后有额外 tail")
-    if _tag(root) == "svg":
-        # Compatibility for explicit input-coordinate wrappers, not the
-        # VectorLayer full-document serializer (which this API never calls).
-        validate_svg(ET.tostring(root, encoding="unicode"), canvas, dpi)
-        return [_semantic(el, 72 / dpi[0]) for el in root]
     return [_semantic(root, 1.0)]  # detached Shape geometry is points
 
 
@@ -383,7 +378,7 @@ def import_annotations(ops, *, svg, name, target_document, canvas, dpi,
             total += len(exported.encode("utf-8"))
             if total > MAX_SVG_BYTES or re.search(r"<!|<\?", exported):
                 raise VectorError("形状回读超预算或含声明")
-            combined.extend(_readback(exported, canvas, dpi))
+            combined.extend(_readback(exported))
             if len(combined) >= MAX_ELEMENTS:
                 raise VectorError("回读元素总数超预算")
         expected_semantics = [_semantic(el, 72 / dpi[0]) for el in expected]

@@ -1,4 +1,4 @@
-"""CAD-22: bounded offline plans and boards of explicitly registered PNGs.
+"""Bounded offline plans and boards of explicitly registered PNGs.
 
 No generation, segmentation, network, Krita, or compare internals. Pillow is
 optional, imported only for board rendering. Linux dir_fd/O_NOFOLLOW required.

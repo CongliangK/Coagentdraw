@@ -52,7 +52,7 @@ def add_project_parser(sub):
         if command != "status":
             p.add_argument("--expect-revision", type=int, help="拒绝基于过期状态的写入")
         if command == "edit":
-            p.add_argument("--intent", help="完整意图卡文本（可手工填写）")
+            p.add_argument("--intent", help="项目意图摘要（可引用完整意图卡）")
             p.add_argument("--pillar", action="append", help="替换设计支柱列表，可重复")
             p.add_argument("--anchor", action="append", help="替换风格锚点列表，可重复")
             p.add_argument("--clear-pillars", action="store_true")
@@ -127,7 +127,7 @@ def add_stage_parser(sub):
 
 
 def add_compare_parser(sub):
-    parser = sub.add_parser("compare", help="离线 PNG 并排比较与决定记录（不修改 Krita，不接入 #25）")
+    parser = sub.add_parser("compare", help="离线 PNG 并排比较与决定记录（不修改 Krita）")
     commands = parser.add_subparsers(dest="compare_cmd", required=True)
     p = commands.add_parser("create", help="手工 before/after → 新目录；可选 CLI-only Pillow")
     p.add_argument("before")
@@ -180,7 +180,7 @@ def add_style_parser(sub):
     commands = parser.add_subparsers(dest="style_cmd", required=True)
     for command in ("init", "show", "edit", "state", "prompt", "compare"):
         p = commands.add_parser(command)
-        p.add_argument("root", help="已有 CAD-19 项目目录；固定独立 style_tokens.cwb sidecar")
+        p.add_argument("root", help="已有项目目录；固定独立 style_tokens.cwb sidecar")
         if command in ("init", "edit", "state"):
             p.add_argument("--actor", required=True, help="人工记录操作者；不验证身份")
             p.add_argument("--reason", required=True)
@@ -198,7 +198,7 @@ def add_style_parser(sub):
             p.add_argument("--output", help="可选显式导出 JSON 新文件；不覆盖，不接入生成")
         elif command == "compare":
             p.add_argument("current", help="手工当前 PNG；与所选参考原始尺寸须相同")
-            p.add_argument("output", help="尚不存在的 CAD-23 比较目录；左参考、右当前")
+            p.add_argument("output", help="尚不存在的比较目录；左参考、右当前")
             p.add_argument("--reference", required=True, help="显式选择唯一参考 id")
             p.add_argument("--crop", type=int, nargs=4, required=True, metavar=("X", "Y", "W", "H"))
             p.add_argument("--candidate-version", help="手工版本；未知则 null")

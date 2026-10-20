@@ -1,4 +1,4 @@
-"""CAD-21 标准库/mock 回归；不证明真实 Krita、PNG 像素或 .kra 重开。"""
+"""标准库/mock 回归；不证明真实 Krita、PNG 像素或 .kra 重开。"""
 import contextlib
 import copy
 import io
@@ -93,7 +93,7 @@ class Fake:
 
 class StageTests(unittest.TestCase):
     def setUp(self):
-        self.tmp = tempfile.TemporaryDirectory(prefix="cad21-")
+        self.tmp = tempfile.TemporaryDirectory(prefix="stage-")
         self.addCleanup(self.tmp.cleanup)
         self.root = Path(self.tmp.name)
         self.document = self.root / "测试.kra"

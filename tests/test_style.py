@@ -1,4 +1,4 @@
-"""CAD-26 offline sidecar contracts; no Krita/ComfyUI or model execution."""
+"""Offline sidecar contracts; no Krita/ComfyUI or model execution."""
 from concurrent.futures import ThreadPoolExecutor
 import contextlib
 import copy
@@ -28,7 +28,7 @@ except ImportError:
 
 class StyleFixture:
     def setUp(self):
-        self.tmp = tempfile.TemporaryDirectory(prefix="cad26-")
+        self.tmp = tempfile.TemporaryDirectory(prefix="style-")
         self.addCleanup(self.tmp.cleanup)
         self.root = Path(self.tmp.name)
         self.project = self.root / "project"
@@ -624,7 +624,7 @@ class StyleReferenceTests(StyleFixture, unittest.TestCase):
 
 class StyleHelpTests(unittest.TestCase):
     def test_all_help_loads_no_execution_dependencies_network_or_cache(self):
-        with tempfile.TemporaryDirectory(prefix="cad26-help-") as tmp:
+        with tempfile.TemporaryDirectory(prefix="style-help-") as tmp:
             code = '''import sys
 sys.path.insert(0, sys.argv[1])
 def audit(event, args):
@@ -663,7 +663,7 @@ assert cwb_style.show(root)["latest"]["revision"] == 0
 assert cwb_style.prompt(root, "character")["fragment"] == ""
 assert "PIL" not in sys.modules
 '''
-        with tempfile.TemporaryDirectory(prefix="cad26-nopillow-") as tmp:
+        with tempfile.TemporaryDirectory(prefix="style-nopillow-") as tmp:
             process = subprocess.run([sys.executable, "-B", "-S", "-c", code, str(ROOT / "core"), tmp],
                                      cwd=tmp, capture_output=True, text=True)
             self.assertEqual(process.returncode, 0, process.stderr)

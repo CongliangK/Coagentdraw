@@ -1,4 +1,4 @@
-"""CAD-22 teaching fixtures only: no model, mask extraction, or Krita evidence."""
+"""Teaching fixtures only: no model, mask extraction, or Krita evidence."""
 import contextlib
 import hashlib
 import io
@@ -123,7 +123,7 @@ runpy.run_path(sys.argv[0], run_name="__main__")
 @unittest.skipIf(Image is None, "optional CLI Pillow not installed")
 class BoardTests(unittest.TestCase):
     def setUp(self):
-        temporary = tempfile.TemporaryDirectory(prefix="cad22-teaching-")
+        temporary = tempfile.TemporaryDirectory(prefix="candidates-teaching-")
         self.addCleanup(temporary.cleanup)
         self.root = Path(temporary.name)
         self.plan = self.root / "plan" / "manifest.json"

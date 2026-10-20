@@ -106,7 +106,7 @@ def locked(root):
         if not stat.S_ISREG(os.fstat(fd).st_mode):
             raise ProjectError("锁路径必须是普通文件")
         if os.name != "posix":
-            raise ProjectError("首版项目写入需要 POSIX 文件锁；当前平台不支持")
+            raise ProjectError("项目写入需要 POSIX 文件锁；当前平台不支持")
         import fcntl
         try:
             fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)

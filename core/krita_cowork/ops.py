@@ -1,6 +1,6 @@
 """ops:在 Krita 主线程执行的图层原语。HTTP 层通过 MainThreadBridge 调用。
 
-硬约束(来自对抗式审查实证):
+运行约束:
 - 仅支持 RGBA8 文档(其他色彩空间明确报错,不静默损坏)。
 - QImage 一律 Format_RGBA8888,逐行按 bytesPerLine 拷贝(规避行填充)。
 - 新图层先挂树再写像素;root 图层只读(不可被 agent 操作整文档)。
@@ -103,7 +103,7 @@ def doc_info():
 
 
 def _optional_layer_property(node, getter, required_methods=()):
-    """仅供列表的新增可选属性使用;写入预读/回读不得降级为未知。"""
+    """仅供列表的可选属性使用;写入预读/回读不得降级为未知。"""
     supported = None  # 能力探测自身异常时,不能谎称不支持。
     try:
         methods = {name: getattr(node, name, None) for name in (getter, *required_methods)}

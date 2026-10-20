@@ -1,18 +1,18 @@
-# CAD-26：有限离线风格 sidecar（不是主状态接入）
+# 有限离线风格 sidecar（不是主状态接入）
 
-## 范围与尚未完成的门槛
+## 当前能力与边界
 
-这是 #26 的**配置、显式提示导出与人工标杆比较工具**，不是整个 Issue 的验收完成。
+提供风格配置、显式提示导出与人工标杆比较。
 
-- `style_tokens` 只保存在已有 CAD-19 项目目录中的独立 `style_tokens.cwb/`。**项目主状态只有 `style_anchors`，没有新增 `style_tokens` 字段**；本实现不修改 [cwb_project.py](<../../core/cwb_project.py>)、主状态 schema 或既有锚点，不将两者自动同步。
-- 不自动读取执行手册，不改 #5 手册、#10 模型代码、生成请求或工作流。提示仅在用户明确执行 `style prompt` 时组织/导出，后续是否采用由人决定。
+- `style_tokens` 只保存在已初始化的项目目录中的独立 `style_tokens.cwb/`。**项目主状态只有 `style_anchors`，不存储 `style_tokens` 字段**；本实现不修改 [cwb_project.py](<../../core/cwb_project.py>)、主状态 schema 或既有锚点，不将两者自动同步。
+- 不自动读取执行手册，不修改生成请求或工作流。提示仅在用户明确执行 `style prompt` 时组织/导出，后续是否采用由人决定。
 - 没有调用 Krita、ComfyUI 或任何模型，没有联网、下载参考图或生成缓存。Pillow 只在登记 PNG 参考或调用比较 `create` 时 lazy 加载，是**外部 CLI-only 可选依赖**，不是 Krita 插件依赖，不自动安装。
 - `style_tokens`、提示词与标杆不保证模型严格跨图一致；不提供自动艺术评价/风格评分，不引入 LoRA。
-- **仍待：**生成主流程接入，以及同一项目的两个不同角色真实生成、同组可追溯约束下人工对照与修复记录。本次离线合成色块/单元测试不替代这些门槛，不据此关闭 #26。
+- 尚未接入生成主流程；跨角色风格一致性和实际修复效果未经过真实生成与人工对照验证。
 
 ## 配置与命令
 
-以下命令均在仓库根目录执行；`PROJECT` 为已有 CAD-19 项目，示例中的文件/路径须由操作者明确准备。所有 style 写操作都要求 `--actor`、非空 `--reason`；这是人工自报记录，**不是身份认证**。
+以下命令均在仓库根目录执行；`PROJECT` 为已初始化的项目，示例中的文件/路径须由操作者明确准备。所有 style 写操作都要求 `--actor`、非空 `--reason`；这是人工自报记录，**不是身份认证**。
 
 ```bash
 python3 core/cwb.py style --help
@@ -88,9 +88,9 @@ python3 core/cwb.py style prompt "$PROJECT" --scope character-b --output charact
 
 输出 JSON 含有稳定的 `fragment`（`dimension: value`，按 token ID 排序）、适用 token/参考完整记录、`style_revision`、该修订文件 SHA256、当时观察到的项目 ID/修订/摘要及边界提示。相同修订、scope 与未变参考的重复导出稳定，没有导出时间戳。`--output` 仅创建完整的新文件，绝不覆盖任何既有文件/目录/链接；禁止写入 style 修订目录。即便没有适用 token，也如实导出空片段，不假装产生风格约束。
 
-**这不是生成请求。** 没有自动改 prompt、seed、模型、workflow 或 #10 运行记录；来源摘要证明文件追溯关系，不证明文字在真实生成中被采用或产生一致性。
+**这不是生成请求。** 没有自动改 prompt、seed、模型、workflow 或 ComfyUI 运行记录；来源摘要证明文件追溯关系，不证明文字在真实生成中被采用或产生一致性。
 
-## 标杆对比：只消费已合并 CAD-23 的公开接口
+## 标杆对比：调用 compare 公开接口
 
 ```bash
 python3 core/cwb.py style compare "$PROJECT" current.png comparison-new \
@@ -106,7 +106,7 @@ python3 core/cwb.py compare show comparison-new
 - 适配器只调用 `cwb_compare.create` 与 `cwb_compare.show`，不改 compare 实现，不调用其私有图像/存储函数。
 - 明确选择一张适用且启用的参考；左侧 Before 为该参考，右侧 After 为手工提供的当前 PNG。多参考配置不自动混合/选“最佳”。
 - **两图原生尺寸必须相同，必须显式给共同 `x y w h` crop，scale=1**；不拉伸、不自动对齐/重采样。不同大小图片须由操作者在本工具外另存准备并登记来源。共同像素尺度不是相同人物身高/语义尺度，也不执行色彩管理校准。
-- CAD-23 保存原始 PNG 字节及 SHA、并排图、共同 crop、尺寸与 scale。style 来源 JSON 放入公开的 `sources.before.source_version`；里面包含修订/参考/适用约束/人工四维评语及验证契约。`candidate_version` 是人工提供，未知为 null；seed/workflow 等未观测字段保持 null。
+- compare 保存原始 PNG 字节及 SHA、并排图、共同 crop、尺寸与 scale。style 来源 JSON 放入公开的 `sources.before.source_version`；里面包含修订/参考/适用约束/人工四维评语及验证契约。`candidate_version` 是人工提供，未知为 null；seed/workflow 等未观测字段保持 null。
 - 四维评语为**人工自报、未核验**，省略为 null（未评审），不是自动一致性分数。比较仅离线产物，不改 Krita 图层或主状态。
 - 已有输出、输入输出同名/别名、错误尺寸/crop、失败验证都不作为成功。不会盲删已有结果。公开 compare 接口每个来源文本字段最多 64 KiB；超大的风格来源 JSON 会明确失败，不截断追溯信息。
 
@@ -114,9 +114,9 @@ python3 core/cwb.py compare show comparison-new
 
 调用前重新验证适用参考当前 SHA；`create` 后以公开 `show` 验证保存的参考 SHA/字节数/尺寸，并再次检查适用参考原路径的当前 SHA。只有这些检查通过，`style compare` 才打印成功 JSON，带有 `reference_validation`。
 
-**公开 `create` 没有 `expected-source-sha` 参数，也没有与 style 共同持有的参考写锁。** 若参考在预检查和 `create` 捕获之间变动，CAD-23 可能先创建一个对它自己有效的目录，style 后检查才失败；若在返回后变动但保存字节仍是旧版，额外的原路径后检查也会报错。此时命令失败并指出目录仅供诊断，**保留新目录，不删除证据、不伪装成功，也不修改 compare manifest**。其 `source_version.validation_contract` 明确“保存的来源信息不等于适配器成功”；单独 `compare show` 可以查看诊断目录，不代表通过 style 验收。
+**公开 `create` 没有 `expected-source-sha` 参数，也没有与 style 共同持有的参考写锁。** 若参考在预检查和 `create` 捕获之间变动，compare 可能先创建一个对它自己有效的目录，style 后检查才失败；若在返回后变动但保存字节仍是旧版，额外的原路径后检查也会报错。此时命令失败并指出目录仅供诊断，**保留新目录，不删除证据、不伪装成功，也不修改 compare manifest**。其 `source_version.validation_contract` 明确“保存的来源信息不等于适配器成功”；单独 `compare show` 可以查看诊断目录，不代表通过 style 验收。
 
-检查不能防止检查点之后的修改，也不能保证检测“改动又恢复”的 ABA 过程。没有宣称原子快照或连续锁保护。对完整适用参考集合的后检查也不能把多个原路径变成原子一致快照。严格竞态封闭仍需将来另行批准的公开接口能力，不能虚构参数或私改 #23 来绕过。
+检查不能防止检查点之后的修改，也不能保证检测“改动又恢复”的 ABA 过程。没有宣称原子快照或连续锁保护。对完整适用参考集合的后检查也不能把多个原路径变成原子一致快照。当前接口不能封闭这些竞争窗口，调用方须遵守上述失败语义。
 
 ## sidecar 持久化与恢复
 
@@ -126,8 +126,8 @@ python3 core/cwb.py compare show comparison-new
 - 先写独占临时文件并 fsync，再 hard-link 不存在的最终名字发布、清理本次临时名并 fsync 目录；不 replace 旧修订。写前失败不追加；目录 fsync 的后发布失败明确提示“已发布，请重开查询”，不能盲目重试。初始化失败留下的目录保留现场。
 - 读历史验证 schema、序号、字段、项目归属、链及状态转换。断号、损坏、链接或链不一致都失败关闭，不自行修复/清理。不认识的非修订文件（例如中断留下的临时文件）不自动删除。
 - 这是应用层不覆盖与可追溯历史，**不是签名/防篡改存储**；有文件写权限的人仍可重写整条链或删除尾部，不能证明操作者真实身份，需自行备份。
-- style 锁独立于 #19 项目锁；项目只读快照不与主状态事务绑定。主状态另行更新时 `show` 区分 `latest.project`（当时观察）与 `current_project`（本次观察），后续 style 修订重新记录观察值。没有回写或覆盖主状态。
-- 项目 ID 与绝对项目路径绑定，参考也保存绝对路径；目录移动/复制到不同位置不属于自动可移植/迁移能力，不能静默接管。保持目录稳定并备份全部历史与原参考；人工恢复应另行审批，不用 reset/删目录掩盖问题。
+- style 锁独立于 项目状态锁；项目只读快照不与主状态事务绑定。主状态另行更新时 `show` 区分 `latest.project`（当时观察）与 `current_project`（本次观察），后续 style 修订重新记录观察值。没有回写或覆盖主状态。
+- 项目 ID 与绝对项目路径绑定，参考也保存绝对路径；目录移动或复制到不同位置会被拒绝。保持目录稳定，并备份修订与原参考；绑定不符时保留文件并人工检查。
 
 ## 离线验收映射
 

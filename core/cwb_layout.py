@@ -1,4 +1,4 @@
-"""CAD-28 offline six-image layout. No network; Pillow is render/prepare CLI-only.
+"""Offline six-image layout. No network; Pillow is render/prepare CLI-only.
 
 Pure placement/vector files are loaded without importing the Krita plugin package.
 All outputs are exclusive new assets; an interrupted bundle remains incomplete.
@@ -244,7 +244,7 @@ def _collect(spec_path):
         total += len(capture[1])
         if total > MAX_TOTAL_BYTES:
             raise ValueError("六图来源总字节预算 64MiB 超限")
-        # Reuse CAD-14 public admission/PNG normalization and contain geometry.
+        # Reuse placement admission/PNG normalization and contain geometry.
         encoded, mapping = _prepare_png(placement, capture, cw, ch, budget)
         sw, sh = mapping["source_size"]
         anchor = _point(item["anchor_source"], sw, sh, "source anchor")
@@ -253,7 +253,7 @@ def _collect(spec_path):
         ox, oy = target[0] - anchor[0] * w // sw, target[1] - anchor[1] * h // sh
         if ox < x or oy < y or ox + w > x + cw or oy + h > y + ch:
             raise ValueError("人工锚点平移后超出 cell")
-        # Imported PNG is pre-scaled; final placement is CAD-14 insert_at_offset.
+        # Imported PNG is pre-scaled; final placement uses insert_at_offset.
         final = placement.plan_placement(w, h, *canvas, "insert_at_offset", ox, oy)
         if role in ("front", "side", "back"):
             view_scales.append(Fraction(*mapping["nominal_scale"]))
@@ -345,7 +345,7 @@ def render(spec_path, output):
 
 
 def _rgba(encoded, size, budget):
-    """Decode only the CAD-14 checked snapshot; CLI-only optional dependency."""
+    """Decode only the snapshot checked by placement; CLI-only optional dependency."""
     try:
         from PIL import Image
     except ImportError as exc:
@@ -370,7 +370,7 @@ def _rgba(encoded, size, budget):
 
 def _verify_rendered(placement, source, rendered, item):
     # Local consistency, NOT authentication against a same-UID writer. Derive
-    # expected bytes from the rechecked original source and production CAD-14
+    # expected bytes from the rechecked original source and production placement
     # sampler; a rewritten manifest SHA cannot authorize different pixels.
     budget = placement.PreprocessBudget()
     encoded, mapping = _prepare_png(placement, source, *item["cell"][2:], budget)
@@ -387,7 +387,7 @@ def _verify_rendered(placement, source, rendered, item):
     actual = _rgba(encoded, size, budget)
     del encoded
     if actual != expected:  # Includes RGB hidden under zero alpha.
-        raise ValueError("渲染 PNG 像素与原源及 CAD-14 采样不符")
+        raise ValueError("渲染 PNG 像素与原图及 placement 采样不符")
     budget.check("prepare 像素核验后")
 
 

@@ -1,6 +1,6 @@
-"""CAD-21: 确定性阶段组；独立 sidecar，不修改项目状态或 Krita 插件。
+"""确定性阶段组；独立 sidecar，不修改项目状态或 Krita 插件。
 
-组名中的随机 [cwb:UUID] 是可见的持久身份标记，不是 #13 文档 token。
+组名中的随机 [cwb:UUID] 是可见的持久身份标记，不是快照文档 token。
 仅在同一 pid/root 的已知会话使用节点 ID；否则必须重新解析随机标记。
 HTTP 创建和 sidecar 写入不是原子事务；未确认请求始终阻止自动重试。
 """
@@ -120,7 +120,7 @@ class Store:
     @contextmanager
     def locked(self):
         if os.name != "posix":
-            raise StageError("首版阶段 sidecar 写入需要 POSIX 文件锁")
+            raise StageError("阶段 sidecar 写入需要 POSIX 文件锁")
         import fcntl
         lock = self.path.with_name(self.path.name + ".lock")
         if lock.is_symlink():

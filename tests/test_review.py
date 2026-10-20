@@ -1,4 +1,4 @@
-"""CAD-24 synthetic fixtures only: structure/safety, never artistic validity."""
+"""Synthetic fixtures only: structure/safety, never artistic validity."""
 import copy
 import hashlib
 import io
@@ -88,7 +88,7 @@ import cwb
 cwb.http = lambda *a, **k: (_ for _ in ()).throw(AssertionError('network forbidden'))
 cwb.main(sys.argv[1:])
 '''
-        with tempfile.TemporaryDirectory(prefix="cad24-help-") as root:
+        with tempfile.TemporaryDirectory(prefix="review-help-") as root:
             env = dict(os.environ, CWB_WF_DIR=str(Path(root) / "nonexistent"), PYTHONDONTWRITEBYTECODE="1")
             for args in (["--help"], ["review", "--help"], ["review", "prepare", "--help"], ["review", "import", "--help"]):
                 with self.subTest(args=args):
@@ -102,7 +102,7 @@ cwb.main(sys.argv[1:])
 @unittest.skipIf(Image is None, "optional CLI Pillow unavailable")
 class ReviewTests(unittest.TestCase):
     def setUp(self):
-        self.tmp = tempfile.TemporaryDirectory(prefix="cad24-synthetic-")
+        self.tmp = tempfile.TemporaryDirectory(prefix="review-synthetic-")
         self.addCleanup(self.tmp.cleanup)
         self.root = Path(self.tmp.name)
         self.images = [self.root / (role + ".png") for role in review.ROLES]

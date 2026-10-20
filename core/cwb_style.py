@@ -1,6 +1,6 @@
-"""CAD-26 offline, human-authored style sidecar. No generation or project writes.
+"""Offline, human-authored style sidecar. No generation or project writes.
 
-Immutable full revisions, not fields added to CAD-19. Linux dir_fd/flock required.
+Immutable full revisions in a separate project sidecar. Linux dir_fd/flock required.
 Pillow is optional, lazy and CLI-only, for registering PNG references.
 """
 import contextlib
@@ -435,7 +435,7 @@ def prompt(root, scope, output=None):
 
 
 def compare_reference(root, reference_id, current, output, *, scope, crop, review=None, candidate_version=None):
-    """Public CAD-23 create/show only; before=chosen reference, after=current PNG."""
+    """Public compare create/show only; before=chosen reference, after=current PNG."""
     from cwb_compare import create, show as show_comparison
     with _store(root) as (fd, project):
         history, digest = _load(fd, project)
@@ -457,7 +457,7 @@ def compare_reference(root, reference_id, current, output, *, scope, crop, revie
                           "success requires saved digest/dimensions and live references checked after create/show; "
                           "no continuous source lock or protection against change-and-restore")
         source_version = _json(provenance).decode("utf-8")
-        # CAD-23 owns image IO/rendering and never overwrites output. No seed,
+        # compare owns image IO/rendering and never overwrites output. No seed,
         # workflow or generation request is inferred or supplied by this adapter.
         _require_current(dict(references=provenance["references"]))
         result = create(selected["path"], current, absolute, crop=crop,
@@ -468,7 +468,7 @@ def compare_reference(root, reference_id, current, output, *, scope, crop, revie
                 raise ValueError("比较捕获的参考与风格修订不同")
             _require_current(dict(references=provenance["references"]))
         except (ValueError, OSError, KeyError, TypeError) as exc:
-            # We cannot retroactively prevent CAD-23 publication without an
+            # We cannot retroactively prevent compare publication without an
             # expected-source-sha API. Preserve evidence, never blindly delete.
             raise ValueError("比较后验证失败；本次新目录仅供诊断，不是成功的风格比较: " + absolute + "; " + str(exc)) from exc
         result.update(reference_id=reference_id, style_revision=history[-1]["revision"],

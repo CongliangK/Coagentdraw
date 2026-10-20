@@ -1,11 +1,11 @@
-# CAD-23 最小离线比较与候选决定
+# 最小离线比较与候选决定
 
-## 范围与未完成门槛
+## 当前能力
 
-这是**手工文件输入的离线模块**，不是生成器或 Krita 操作入口。无需网络、模型、Krita、ComfyUI；不使用 CAD-13 token，不写图层，不调用 CAD-18 图像诊断，不修改 CAD-19 项目 schema。比较资产和事件存放在独立 sidecar 目录。
+这是**手工文件输入的离线模块**，不是生成器或 Krita 操作入口。无需网络、模型、Krita、ComfyUI；不写图层、不生成诊断图、不修改项目状态。比较资产和事件存放在独立 sidecar 目录。
 
 - 已实现：原始 PNG 关联、1:1 横向 Before/After、共同裁切、来源摘要、离线接受/拒绝/隐藏/撤回记录、重开查询理由。
-- **未实现/未联调**：#25 决策库（云端任务）、#17 局部重绘链路、真实 Krita 图层选择/可见性操作、一键恢复原投影及保存 `.kra` 后恢复。本模块不构成这些任务完成或 issue #23 整体关闭的证据。
+- 不执行局部重绘、Krita 图层选择/可见性操作、原投影恢复或 `.kra` 保存。
 - `accept` 只记录选择；`reject` 不删除任何资产；`hide` 只记录离线 hidden 状态；`withdraw` 只把离线状态置回 pending。**hide/withdraw 均不会实际隐藏/显示图层，也不会恢复原画面。** 每条命令响应都包含 `offline_record_only`/中文边界提示。
 
 ## CLI
@@ -54,7 +54,7 @@ python3 core/cwb.py compare decide /tmp/new-comparison withdraw \
 
 每个事件保存比较 UUID、序号、action、previous_state/state、理由、UTC 时间、前事件字节 SHA256，以及 `mode=offline_record_only`、`krita_applied=false`。`show` 重新读取资产和完整事件，检查资产/比较图摘要、事件连续顺序、状态迁移和前事件哈希，返回当前状态、序号和全部理由。没有源文件也能重开已保存比较；追加决定则要求原路径仍可读取且摘要与原比较一致。
 
-事件关联 manifest 的比较 UUID，manifest 关联源版本及资产摘要。以上是未来 #25 适配器**可读取的输入**，不是 #25 schema、API、同步协议或联调结果。适配器未来需要显式处理稳定项目/作品身份、外部事件去重和真实图层动作证据，本任务不实现它们。
+事件关联 manifest 的比较 UUID，manifest 关联源版本及资产摘要。记录不与项目状态或 Krita 图层动作同步。
 
 ## 安全、失败与限制
 
@@ -71,4 +71,4 @@ PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests -p test_compare.
 PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests -v
 ```
 
-新增测试实际解码合成 PNG，核对原图/透明度/共同 crop/显示坐标、尺寸/格式/位深错误、SHA 和未知字段、源在生成/记录中变化、事件顺序/并发/跨进程重开/理由/拒绝资产保留、符号链接/硬链接/路径别名/FIFO、写盘失败清理。帮助在 `python -B -S` 下运行且用审计钩子禁止 socket 和 mkdir，验证无 Pillow、无联网、无缓存创建。测试不是 #17、#25 或 Krita 实机证据。
+测试实际解码合成 PNG，核对原图/透明度/共同 crop/显示坐标、尺寸/格式/位深错误、SHA 和未知字段、源在生成/记录中变化、事件顺序/并发/跨进程重开/理由/拒绝资产保留、符号链接/硬链接/路径别名/FIFO、写盘失败清理。帮助在 `python -B -S` 下运行且用审计钩子禁止 socket 和 mkdir，验证无 Pillow、无联网、无缓存创建。测试不证明真实画改或 Krita 实机行为。

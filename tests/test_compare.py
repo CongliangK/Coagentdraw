@@ -1,4 +1,4 @@
-"""CAD-23 real offline PNG tests; no Krita, model or decision-store integration."""
+"""Real offline PNG tests; no Krita, model or decision-store integration."""
 from concurrent.futures import ThreadPoolExecutor
 import contextlib
 import hashlib
@@ -26,7 +26,7 @@ except ImportError:
 @unittest.skipIf(Image is None, "optional external CLI Pillow unavailable")
 class CompareTests(unittest.TestCase):
     def setUp(self):
-        self.tmp = tempfile.TemporaryDirectory(prefix="cad23-")
+        self.tmp = tempfile.TemporaryDirectory(prefix="compare-")
         self.addCleanup(self.tmp.cleanup)
         self.root = Path(self.tmp.name)
         self.before = self.root / "before.png"
@@ -365,7 +365,7 @@ class CompareTests(unittest.TestCase):
 
 class HelpTests(unittest.TestCase):
     def test_import_and_all_help_without_pillow_network_or_cache(self):
-        with tempfile.TemporaryDirectory(prefix="cad23-help-") as tmp:
+        with tempfile.TemporaryDirectory(prefix="compare-help-") as tmp:
             code = '''import sys
 from pathlib import Path
 sys.path.insert(0, sys.argv[1])

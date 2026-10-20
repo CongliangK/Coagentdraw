@@ -1,21 +1,21 @@
-# CAD-14：确定性图像导入与坐标规则（离线实现）
+# 确定性图像导入与坐标规则（离线实现）
 
 ## 范围与证据边界
 
 `/layer/add` 支持 `parent_id`、`above`、`offset_x/y` 与三种导入模式。仅新建透明 `paintLayer`，不覆盖、删除、移动或合并旧层；画布尺寸不变。当前仅完成纯 Python 映射与 Qt/Krita 替身回归，**没有运行真实 Qt 解码或 Krita 通道/像素落点验收**。
 
-不提供模型编辑、选区自动回填、#17 强文档安全。#13 token 不接入此写接口，也不是安全写回凭证：接口仍在主线程操作当时的活动文档，调用前人工确认文档；网络超时不能证明未发生写入。
+不提供模型编辑、选区自动回填或文档条件写入。快照 token 不接入此写接口，也不是安全写回凭证：接口仍在主线程操作当时的活动文档，调用前人工确认文档；网络超时不能证明未发生写入。
 
 ## 请求参数
 
 必填：`png_path`、`name`（非空字符串）。可选：`parent_id`、`above`（组 ID/同级 ID）、`offset_x/y`（默认 0）、`mode`。拒绝未知字段。
 
-`mode` 是以下三个受支持名称之一。`crop_at_bbox` **未实现**，返回 OpError / HTTP 400，绝不降级到原尺寸、适配或裁切。
+`mode` 仅支持 `keep_size`、`fit_canvas`、`insert_at_offset`；其他名称返回 OpError / HTTP 400。
 
 - 未指定 `mode`（或为 null）：offset 均为 0 则 `keep_size`，否则 `insert_at_offset`。
 - 显式 `keep_size`/`fit_canvas` 不接受非零 offset，不能隐式覆盖用户坐标。
 - 坐标只接受 JSON 整数 0..32768，拒绝 bool、所有 float（包括 `1.0`）、NaN/Infinity、数字字符串、负数、超范围整数；不使用 `int()` 截断。源图/画布每轴为 1..32768 的整数；最终矩形必须完整落在画布内，越界直接拒绝，不依赖 Krita 静默裁切。
-- 父节点只能是组（省略/null 使用 root 容器）；above 必须是该父级的直接 paint/group/vector 子节点。保留原有会话节点 ID 与挂树顺序检查。
+- 父节点只能是组（省略/null 使用 root 容器）；above 必须是该父级的直接 paint/group/vector 子节点。使用会话节点 ID 与挂树顺序检查。
 
 ## 有界导入与资源预算
 
@@ -68,14 +68,14 @@ sy = floor((2*v+1)*Sh/(2*H))
 
 ## 结果及写入顺序
 
-结果保留 `id/name/width/height/parent_id`，width/height 指**写入矩形**，不是图层非透明 bounds 或画布。新增 `placement`，版本 1：
+结果保留 `id/name/width/height/parent_id`，width/height 指**写入矩形**，不是图层非透明 bounds 或画布。`placement` 元数据的版本为 1，包含：
 
 - `mode`、`source_size`、`canvas_size`、`output_size`、`origin`；
 - `source_rect=[0,0,Sw,Sh]`、`destination_rect=[X,Y,W,H]`；
 - `nominal_scale=[分子,分母]`，`edge_transform` 精确记录实际两轴比 `[W,Sw]` / `[H,Sh]` 及平移；
 - `rounding`、`sampling` 算法名称；`upscale=false`、`crop=false`；
 - `transparent_margins=[左,上,右,下]` 表示新层写入矩形之外的透明范围，不表示源图内部透明边缘；
-- `resources` 新增源像素、`decoded_rgba_bytes`、输出采样/字节、`estimated_working_bytes`，实际导入时包含转换后的真实行 stride；纯计划使用紧密 RGBA stride。它们是准入估算，不是测量值。
+- `resources` 包含源像素、`decoded_rgba_bytes`、输出采样/字节、`estimated_working_bytes`，实际导入时包含转换后的真实行 stride；纯计划使用紧密 RGBA stride。它们是准入估算，不是测量值。
 
 所有参数类型、尺寸、边界、父组/同级关系、QImage 转换及缓冲区校验在创建节点前完成。保留 RGBA/U8 文档守卫、`Format_RGBA8888`、`constBits().asarray(bytesPerLine*height)` 与逐行去 padding，在写入 Krita 的 `setPixelData` 前将 RGBA 转为 BGRA（见 `snapshot.swap_rb`），QImage 侧仍使用 RGBA。先创建/挂树并回读父组与 above 顺序，再 `setPixelData`，检查返回值，再回读树。失败会报错；写入失败后可能留下新空层/部分层，**不自动删除任何层或重试**，不承诺事务回滚。返回成功也不等于已做 Krita 像素 readback。
 
@@ -108,4 +108,4 @@ PYTHONDONTWRITEBYTECODE=1 python3 -B -m unittest discover -s tests -v
 3. 将完整局部 PNG 以已知非零坐标写入新层，数值核对边角/内部标记及透明边缘，核对原层未变、组/above 顺序正确；保存/重开 `.kra` 再核对。
 4. 测量准入上限内的真实 Qt/Krita 主线程耗时/内存及预算拒绝。纯 Python 资源量测不能替代真实解码、写层、画布投影或 bridge 排队超时测试；现有桥接超时不取消已开始操作。
 
-上述完整实机项仍**未验**，因此不能据离线代码直接宣称 issue 的真实 Krita 像素验收完成。
+上述完整实机项仍**未验**，因此不能据离线代码直接宣称真实 Krita 像素验收完成。

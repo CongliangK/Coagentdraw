@@ -1,4 +1,4 @@
-"""CAD-12 offline contract tests. Fakes are NOT Krita/Qt visual evidence."""
+"""Offline contract tests. Fakes are NOT Krita/Qt visual evidence."""
 import contextlib
 import io
 import os
@@ -387,7 +387,7 @@ class Client(unittest.TestCase):
                     with contextlib.redirect_stdout(io.StringIO()), self.assertRaises(SystemExit) as exc:
                         cwb.main(args)
                     self.assertEqual(exc.exception.code, 0)
-            with tempfile.TemporaryDirectory(prefix='cad12-help-') as tmp:
+            with tempfile.TemporaryDirectory(prefix='layer-props-help-') as tmp:
                 result = subprocess.run([sys.executable, '-B', str(groups.ROOT / 'core/cwb.py'), *args],
                                         cwd=tmp, env={**os.environ, 'CWB_WF_DIR': tmp + '/absent'},
                                         capture_output=True)

@@ -1,4 +1,4 @@
-"""CAD-30 fixture regressions; no Krita, network, or real artwork claims."""
+"""Fixture regressions; no Krita, network, or real artwork claims."""
 import copy
 import hashlib
 import json
@@ -212,7 +212,7 @@ class ExportTests(unittest.TestCase):
                 self.assert_clean()
 
     def test_state_and_lock_cannot_be_selected_as_final(self):
-        # CAD-19 already forbids these asset paths; keep that schema boundary intact.
+        # project already forbids these asset paths; keep that schema boundary intact.
         data = project.read_state(self.root)[0]
         for relative in (project.STATE, project.LOCK):
             for zipped in (False, True):

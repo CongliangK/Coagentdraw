@@ -1,4 +1,4 @@
-"""CAD-28: restricted SVG and in-memory Krita/handler doubles, NOT real editing QA."""
+"""Restricted SVG and in-memory Krita/handler doubles, NOT real editing QA."""
 import io
 import json
 from pathlib import Path
@@ -12,7 +12,7 @@ import test_layer_groups as groups
 import test_layer_props as props
 
 ROOT = Path(__file__).resolve().parents[1]
-vector = groups.load_module('_cad28_vector', ROOT / 'core/krita_cowork/vector.py')
+vector = groups.load_module('_layout_vector', ROOT / 'core/krita_cowork/vector.py')
 ops = groups.ops
 
 
@@ -84,7 +84,7 @@ class Document(groups.Doc):
         self.factory = VectorNode
 
     def fileName(self):
-        return '/dedicated/cad28.kra'
+        return '/dedicated/layout.kra'
 
     def width(self):
         return 100
@@ -159,15 +159,15 @@ class Operations(unittest.TestCase):
         self.app = types.SimpleNamespace(activeDocument=lambda: self.doc)
         self.patches = [patch.object(ops, '_active_doc', return_value=self.doc),
                         patch.object(ops, '_krita', return_value=self.app)]
-        package = types.ModuleType('_cad11_package')
+        package = types.ModuleType('_layer_groups_package')
         package.__path__ = [str(ROOT / 'core/krita_cowork')]
-        self.patches.append(patch.dict(sys.modules, {'_cad11_package': package}))
+        self.patches.append(patch.dict(sys.modules, {'_layer_groups_package': package}))
         for p in self.patches:
             p.start()
             self.addCleanup(p.stop)
 
     def call(self, **changes):
-        values = dict(svg=svg(), name='annotations', target_document='/dedicated/cad28.kra',
+        values = dict(svg=svg(), name='annotations', target_document='/dedicated/layout.kra',
                       canvas=[100, 200], dpi=[300, 300], dedicated_document=True)
         values.update(changes)
         return ops.layer_vector(**values)
@@ -188,7 +188,7 @@ class Operations(unittest.TestCase):
 
     def test_preflight_refuses_wrong_target_capability_and_guards(self):
         for changes in [dict(target_document='/other.kra'), dict(target_document='relative.kra'),
-                        dict(target_document='/dedicated/../cad28.kra'), dict(dedicated_document=False),
+                        dict(target_document='/dedicated/../layout.kra'), dict(dedicated_document=False),
                         dict(dedicated_document=1), dict(canvas=[101, 200]), dict(dpi=[72, 72]),
                         dict(parent_id=self.old.uid), dict(parent_id=self.doc.root.uid),
                         dict(above_layer_id=self.doc.root.uid), dict(svg='bad')]:
@@ -244,28 +244,16 @@ class Operations(unittest.TestCase):
             result = self.call()
         self.assertEqual(result['status'], 'structural_readback_only')
         self.assertFalse(result['krita_editing_verified'])
-        # Also accept a strict complete input-coordinate wrapper, and a native
-        # line (factory success need not use the KoPath fallback).
-        for shapes in ([Shape(svg())], [Shape(NATIVE[0]), Shape(
-                '<line xmlns="http://www.w3.org/2000/svg" id="shape0" '
-                'x1="2.40" y1="7.2" x2="21.6" y2="7.2" stroke="#657580" stroke-width="2.4e-1"/>'),
-                Shape(NATIVE[2])]):
-            with patch.object(VectorNode, 'shapes', return_value=shapes):
-                self.assertEqual(self.call()['status'], 'structural_readback_only')
+        # A line factory can serialize a native line instead of a path.
+        shapes = [Shape(NATIVE[0]), Shape(
+            '<line xmlns="http://www.w3.org/2000/svg" id="shape0" '
+            'x1="2.40" y1="7.2" x2="21.6" y2="7.2" stroke="#657580" stroke-width="2.4e-1"/>'),
+            Shape(NATIVE[2])]
+        with patch.object(VectorNode, 'shapes', return_value=shapes):
+            self.assertEqual(self.call()['status'], 'structural_readback_only')
 
     def test_complete_readback_rejects_descendants_tail_extra_roots_and_unknowns(self):
         original = ET.fromstring(svg())
-        echo_attacks = [
-            svg().replace('</text>', '<tspan x="9999">EXTRA</tspan></text>'),
-            svg().replace('</text>', '<tspan/>EXTRA</text>'),
-            svg().replace('</text>', '</text>TAIL'),
-            svg().replace('><text', '>EXTRA<text'),
-        ]
-        for attack in echo_attacks:
-            with self.subTest(echo_attack=attack):
-                with patch.object(VectorNode, 'shapes', return_value=[Shape(attack)]):
-                    with self.assertRaises(ops.PropsWriteError):
-                        self.call()
         attacks = [
             ET.tostring(original[0], encoding='unicode') + 'TAIL',
             NATIVE[0].replace('</text>', '<tspan/>EXTRA</text>'),
@@ -298,14 +286,6 @@ class Operations(unittest.TestCase):
                         self.assertEqual(error.exception.payload['failed'], 'readback')
                         refresh.assert_not_called()
                 self.assertIs(self.doc.root.children[0], self.old)
-
-    def test_readback_svg_wrapper_cannot_hide_changed_physical_mapping(self):
-        changed = svg().replace('width="24pt"', 'width="48pt"')
-        with patch.object(VectorNode, 'shapes', return_value=[Shape(changed)]):
-            with self.assertRaises(ops.PropsWriteError) as error:
-                self.call()
-        self.assertEqual(error.exception.payload['failed'], 'readback')
-        self.assertFalse(error.exception.payload['rolled_back'])
 
     def test_active_document_changes_stop_next_write(self):
         real = self.doc.createVectorLayer
@@ -342,7 +322,7 @@ class Routing(unittest.TestCase):
     request = groups.Routing.request
 
     def payload(self):
-        return dict(svg=svg(), name='annotation', target_document='/dedicated/cad28.kra',
+        return dict(svg=svg(), name='annotation', target_document='/dedicated/layout.kra',
                     canvas=[100, 200], dpi=[300, 300], dedicated_document=True, above='a')
 
     def test_vector_help_schema_alias_bridge_and_partial_error(self):

@@ -1,4 +1,4 @@
-"""CAD-14 pure mapping and Qt/Krita doubles; NOT a live pixel/channel test."""
+"""Pure mapping and Qt/Krita doubles; NOT a live pixel/channel test."""
 import contextlib
 import io
 import importlib
@@ -16,8 +16,8 @@ from unittest.mock import Mock, patch
 
 import test_layer_groups as groups
 
-placement = groups.load_module('_cad14_placement', groups.ROOT / 'core/krita_cowork/placement.py')
-snapshot = groups.load_module('_cad13_snapshot', groups.ROOT / 'core/krita_cowork/snapshot.py')
+placement = groups.load_module('_placement_placement', groups.ROOT / 'core/krita_cowork/placement.py')
+snapshot = groups.load_module('_snapshot_snapshot', groups.ROOT / 'core/krita_cowork/snapshot.py')
 
 
 def fixture(width=7, height=5):
@@ -81,7 +81,7 @@ class Geometry(unittest.TestCase):
         self.assertEqual(placement.plan_placement(*base, offset_x=1)['mode'], 'insert_at_offset')
         for kw in ({'mode': 'keep_size', 'offset_x': 1},
                    {'mode': 'fit_canvas', 'offset_y': 1},
-                   {'mode': 'crop_at_bbox'}, {'mode': 'other'}, {'mode': []}):
+                   {'mode': 'unsupported_mode'}, {'mode': 'other'}, {'mode': []}):
             with self.subTest(kw=kw), self.assertRaises(placement.PlacementError):
                 placement.plan_placement(*base, **kw)
 
@@ -166,7 +166,7 @@ class DecodeTrap:
 class ResourceBudgets(unittest.TestCase):
     def setUp(self):
         groups.Operations.setUp(self)
-        self.tmp = tempfile.TemporaryDirectory(prefix='cad14-placement-')
+        self.tmp = tempfile.TemporaryDirectory(prefix='placement-placement-')
         self.addCleanup(self.tmp.cleanup)
         self.path = Path(self.tmp.name) / 'input.png'
 
@@ -312,7 +312,7 @@ class ResourceBudgets(unittest.TestCase):
 @contextlib.contextmanager
 def virtual_fixture_png():
     """Only the old mapping tests use an imaginary fixture.png; not budget tests."""
-    module = importlib.import_module('_cad11_package.placement')
+    module = importlib.import_module('_layer_groups_package.placement')
     original = module.prepare_png
     def prepare(path, *args, **kwargs):
         if path == os.path.abspath('fixture.png'):
@@ -400,7 +400,7 @@ class ImportOperations(unittest.TestCase):
             for key in ('offset_x', 'offset_y'):
                 with self.subTest(value=value, key=key), self.assertRaises(groups.ops.OpError):
                     groups.ops.layer_add('fixture.png', 'bad', **{key: value})
-        for kw in ({'offset_x': 10}, {'offset_y': 12}, {'mode': 'crop_at_bbox'},
+        for kw in ({'offset_x': 10}, {'offset_y': 12}, {'mode': 'unsupported_mode'},
                    {'mode': 'keep_size', 'offset_x': 1}, {'parent_id': True},
                    {'above_layer_id': []}, {'name': ''}, {'png_path': None}):
             args = {'png_path': 'fixture.png', 'name': 'bad', **kw}
@@ -496,7 +496,7 @@ class Contract(unittest.TestCase):
             expected = {'png_path': os.path.abspath('fixture.png'), 'name': 'paint',
                         'parent_id': 'g', 'above': 'a', 'offset_x': 0, 'offset_y': 0, **extra}
             http.assert_called_once_with(groups.cwb.Krita + '/layer/add', expected, timeout=120)
-        for args in (['--x', '1.9'], ['--mode', 'crop_at_bbox'],
+        for args in (['--x', '1.9'], ['--mode', 'unsupported_mode'],
                      ['--mode', 'unknown']):
             with patch.object(groups.cwb, 'http') as http, contextlib.redirect_stderr(io.StringIO()):
                 with self.assertRaises(SystemExit):
@@ -506,10 +506,10 @@ class Contract(unittest.TestCase):
     def test_http_to_ops_contract_and_bad_coordinate_400(self):
         routing = groups.Routing()
         routing.setUp()
-        package = types.ModuleType('_cad11_package')
+        package = types.ModuleType('_layer_groups_package')
         package.__path__ = [str(groups.ROOT / 'core/krita_cowork')]
         doc = groups.Doc()
-        with patch.dict(sys.modules, {'_cad11_package': package}), \
+        with patch.dict(sys.modules, {'_layer_groups_package': package}), \
                 patch.object(groups.ops, '_active_doc', return_value=doc), \
                 patch.object(groups.ops, 'QImage', FixtureImage), virtual_fixture_png():
             body = {'png_path': 'fixture.png', 'name': 'paint', 'mode': 'insert_at_offset',
@@ -526,7 +526,7 @@ class Contract(unittest.TestCase):
                 count = len(doc.created)
                 self.assertEqual(routing.request('/layer/add', {**body, 'offset_x': value})[0], 400)
                 self.assertEqual(len(doc.created), count)
-            self.assertEqual(routing.request('/layer/add', {**body, 'mode': 'crop_at_bbox'})[0], 400)
+            self.assertEqual(routing.request('/layer/add', {**body, 'mode': 'unsupported_mode'})[0], 400)
 
 
 if __name__ == '__main__':

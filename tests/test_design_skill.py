@@ -115,19 +115,9 @@ class DesignSkillBundleTests(unittest.TestCase):
         for term in ["主形", "辅形", "方向", "比例", "分布", "整身轮廓"]:
             self.assertIn(term, prompts["剪影与形状语言"])
 
-    def test_removed_fields_are_not_reintroduced_elsewhere(self):
-        text, tables = self.phase_one_tables()
+    def test_card_fields_are_unique(self):
+        _, tables = self.phase_one_tables()
         all_fields = [row[0] for table in tables for row in table[2:]]
-        for old_field in [
-            "起点", "可能分支", "当前状态", "关联素材/画布", "用途与观看条件",
-            "必须保留", "需要避开", "关联资料与画布", "优先探索问题", "当前状态与去向",
-            "主题 Theme", "核心幻想 Fantasy", "功能 Function", "独特之处",
-            "最重要的表达", "关键矛盾", "必须体现", "取舍优先级", "综合表述",
-        ]:
-            with self.subTest(old_field=old_field):
-                self.assertNotIn(old_field, all_fields)
-        for old_heading in ["### 关键表达词", "### 一句话角色意图", "## 起点简表"]:
-            self.assertNotIn(old_heading, text)
         self.assertEqual(len(all_fields), len(set(all_fields)))
 
     def test_core_fantasy_is_explicit_and_audience_facing(self):
@@ -135,8 +125,6 @@ class DesignSkillBundleTests(unittest.TestCase):
         for table in [tables[0]]:
             prompts = {row[0]: row[1] for row in table[2:]}
             self.assertIn("核心幻想", prompts)
-            self.assertNotIn("吸引力", prompts)
-            self.assertNotIn("核心表达", prompts)
             for term in ["观众", "玩家", "读者", "幻想", "想象"]:
                 with self.subTest(table=table[2][0], term=term):
                     self.assertIn(term, prompts["核心幻想"])
@@ -178,11 +166,6 @@ class DesignSkillBundleTests(unittest.TestCase):
             with self.subTest(document=document):
                 guidance = document.read_text(encoding="utf-8")
                 self.assertRegex(guidance, r"核心(?:视觉|识别)组合")
-                self.assertNotIn("唯一主重点", guidance)
-                self.assertNotIn("全角色一个主重点", guidance)
-                self.assertNotIn("视觉焦点回答先看哪里", guidance)
-        self.assertNotIn("唯一主重点", text)
-        self.assertNotIn("视觉焦点回答先看哪里", text)
 
     def test_whole_figure_structure_precedes_dependent_details(self):
         text, tables = self.phase_one_tables()

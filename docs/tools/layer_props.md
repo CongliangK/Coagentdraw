@@ -1,8 +1,8 @@
-# CAD-12 确定性图层属性
+# 确定性图层属性
 
 ## 状态与边界
 
-本项提供本地 HTTP → 主线程桥 → Krita 属性 API 和 CLI；离线替身测试不代表真实 Krita 6/Python 3.13/PyQt6 或画布效果通过验收。**normal/multiply/overlay/screen 是代码采用的 Krita 稳定 ID，本次未进行本机混合模式或 Alpha Lock 视觉验证。** 不扩大到滤镜层/蒙版体系，不安装插件、不重启、不修改现有作品、不调用模型。
+本项提供本地 HTTP → 主线程桥 → Krita 属性 API 和 CLI；离线替身测试不代表真实 Krita 6/Python 3.13/PyQt6 或画布效果通过验收。**normal/multiply/overlay/screen 是代码采用的 Krita 稳定 ID，尚未完成本机混合模式或 Alpha Lock 视觉验证。** 不扩大到滤镜层/蒙版体系，不安装插件、不重启、不修改现有作品、不调用模型。
 
 ## HTTP 契约
 
@@ -29,11 +29,11 @@
 {"error":"属性写入失败;可能已部分写入,未回滚,请重新读取 /layers: ...","id":"...","failed":"blending_mode","attempted":["alpha_locked","opacity","blending_mode"],"verified":["alpha_locked","opacity"],"rolled_back":false}
 ```
 
-`attempted` 包括可能已修改后才抛异常的 setter；`verified` 仅表示当时回读匹配，不承诺画布最终效果或没有后续副作用。投影刷新失败时 `failed` 为 `refreshProjection`，属性也可能全部已写。桥超时仍为 503，**不保证主线程任务取消/未写入**。发生上述失败先回读 `/layers`，检查 GUI，勿盲目重试。`/layers` 对新增可选 getter 故障仍返回树和必需字段，但该属性会是 `null` 并附 `property_status` 错误；这表示**当前无法核实**，不表示写入未生效或已恢复到旧值。列表恢复不等于写入成功，不能据此重试 setter 或将失败请求改判为成功；需结合 GUI 或 getter 恢复后的再次查询确认。必需字段、文档守卫和主线程桥错误仍可能阻止查询，本契约不承诺任意故障下都能恢复。
+`attempted` 包括可能已修改后才抛异常的 setter；`verified` 仅表示当时回读匹配，不承诺画布最终效果或没有后续副作用。投影刷新失败时 `failed` 为 `refreshProjection`，属性也可能全部已写。桥超时仍为 503，**不保证主线程任务取消/未写入**。发生上述失败先回读 `/layers`，检查 GUI，勿盲目重试。`/layers` 对可选 getter 故障仍返回树和必需字段，但该属性会是 `null` 并附 `property_status` 错误；这表示**当前无法核实**，不表示写入未生效或已恢复到旧值。列表恢复不等于写入成功，不能据此重试 setter 或将失败请求改判为成功；需结合 GUI 或 getter 恢复后的再次查询确认。必需字段、文档守卫和主线程桥错误仍可能阻止查询，本契约不承诺任意故障下都能恢复。
 
 ## GET /layers 属性
 
-每个节点保留原有字段和 opacity 0..1 约定，增加：
+每个节点的 opacity 使用 0..1 约定，并返回以下属性：
 
 - `blending_mode`：实际 `blendingMode()` ID；读取时保留未知既有模式，不擅自映射为 normal。API 缺失或 getter 异常为 JSON null。
 - `alpha_lock_supported`：本接口的节点/API 能力（paintLayer 且 getter/setter 可调用），不是本次 getter 成功保证。可调用 getter 抛错时仍为 true；已知节点不适用或 API 缺失为 false；能力探测本身抛错、无法判断时为 null。
@@ -64,9 +64,9 @@ CLI bool 仅 `true`/`false`；有限区间和模式在发 HTTP 前检查；省�
 
 ## 证据与待验
 
-离线回归：[专属属性测试](../../tests/test_layer_props.py) 验证数值边界、非法类型、全部稳定 ID 的参数/回读契约、root/节点类型/色彩守卫、全部预检先于写入、静默 setter/异常/部分写入、列表兼容字段、路由主线程桥调用、错误状态与 CLI 无副作用帮助。另有永久错误注入回归覆盖两项 getter 单独/联合抛错、无关节点、完整健康树保留、缺 API/不适用节点/能力未知的区分、必需字段错误不降级，以及 setter 已生效而回读失败后通过真实 Handler 的 GET `/layers` 恢复查询（无 socket），并确认重试仍严格预读失败。既有图层组测试继续执行。它们使用替身，不证明真实主线程调度、Qt 像素或 Krita 方法行为。
+离线回归：[专属属性测试](../../tests/test_layer_props.py) 验证数值边界、非法类型、全部稳定 ID 的参数/回读契约、root/节点类型/色彩守卫、全部预检先于写入、静默 setter/异常/部分写入、列表属性字段、路由主线程桥调用、错误状态与 CLI 无副作用帮助。另有永久错误注入回归覆盖两项 getter 单独/联合抛错、无关节点、完整健康树保留、缺 API/不适用节点/能力未知的区分、必需字段错误不降级，以及 setter 已生效而回读失败后通过真实 Handler 的 GET `/layers` 恢复查询（无 socket），并确认重试仍严格预读失败。既有图层组测试继续执行。它们使用替身，不证明真实主线程调度、Qt 像素或 Krita 方法行为。
 
-**尚待授权的真实 Krita 验收（本次未执行，不作为已通过证据）：**
+**真实 Krita 待验项（使用已授权专用测试文档）：**
 
 1. 在专用测试文档准备有明显剪影边界的 paintLayer 和明暗 paintLayer，记录其 ID；对比 GUI 属性面板和 `/layers`。
 2. 剪影层设置 Alpha Lock true，在透明边界外手绘，确认不增加不透明像素；false 后比较；组上请求 Alpha Lock 应明确失败且其他属性不写入。
@@ -74,4 +74,4 @@ CLI bool 仅 `true`/`false`；有限区间和模式在发 HTTP 前检查；省�
 4. 在有底色的测试图层逐一设置 normal/multiply/overlay/screen，记录实际回读 ID、面板名称和画布效果，确认叠加/滤色确实工作。组的混合/穿透行为也需独立确认，不能由 paintLayer 替代。
 5. 验证 HTTP 桥实际主线程执行和超时说明；有必要时在专用文件手动保存/重开检查，不覆盖用户作品。
 
-在这些证据齐全前，Issue 中“本机验证混合模式”和最终画布/面板验收仍未完成。
+在这些证据齐全前，本机混合模式与最终画布/面板验收仍未完成。

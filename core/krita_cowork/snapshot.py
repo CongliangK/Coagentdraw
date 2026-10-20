@@ -1,4 +1,4 @@
-"""CAD-13: main-thread, full-canvas projection/selection snapshots.
+"""Main-thread, full-canvas projection/selection snapshots.
 
 No Krita/Qt imports: the byte codec and filesystem contract are offline-testable.
 The caller MUST run export() in the existing MainThreadBridge callback. This is

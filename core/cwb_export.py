@@ -1,4 +1,4 @@
-"""CAD-30: offline, explicit-selection export; never writes project assets/state."""
+"""Offline, explicit-selection export; never writes project assets/state."""
 import ctypes
 import errno
 import hashlib
@@ -130,7 +130,7 @@ def export_project(root, output, assets, roles=(), metadata=None, zipped=False):
     snapshots = {}
     data, raw, state_snapshot = _read_json(root, "project_state.json")
     _remember_snapshot(snapshots, "project_state.json", state_snapshot)
-    validate(data)  # consume CAD-19 without changing its schema or implementation
+    validate(data)  # validate the current project schema before reading selected assets
     if not assets or len(assets) != len(set(assets)):
         raise ProjectError("必须显式选择资产，且不能重复")
     index = {entry["id"]: entry for entry in data["assets"]}

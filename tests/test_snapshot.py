@@ -1,4 +1,4 @@
-"""CAD-13 offline tests. Doubles DO NOT prove Krita pixel/lifecycle semantics.
+"""Offline tests. Doubles DO NOT prove Krita pixel/lifecycle semantics.
 
 The PNG encoder/decoder, filesystem failures and HTTP/CLI plumbing run locally;
 Krita Document/Selection/Notifier are explicit Python doubles, not live evidence.
@@ -32,7 +32,7 @@ def load_module(name, path):
     return module
 
 
-snapshot = load_module("_cad13_snapshot", ROOT / "core/krita_cowork/snapshot.py")
+snapshot = load_module("_snapshot_snapshot", ROOT / "core/krita_cowork/snapshot.py")
 
 
 def decode_png(png):
@@ -222,7 +222,7 @@ class Codec(unittest.TestCase):
 
 class Exports(unittest.TestCase):
     def setUp(self):
-        self.temp = tempfile.TemporaryDirectory(prefix="cad13-")
+        self.temp = tempfile.TemporaryDirectory(prefix="snapshot-")
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
         self.app = App()
@@ -509,22 +509,22 @@ class Plumbing(unittest.TestCase):
         qtgui.QImage = Mock()
         krita = types.ModuleType("krita")
         krita.Krita = Mock()
-        cls.package = types.ModuleType("_cad13_package")
+        cls.package = types.ModuleType("_snapshot_package")
         cls.package.__path__ = []
-        bridge = types.ModuleType("_cad13_package.bridge_qt")
+        bridge = types.ModuleType("_snapshot_package.bridge_qt")
         bridge.MainThreadBridge = Mock
         with patch.dict(sys.modules, {"PyQt6": types.ModuleType("PyQt6"), "PyQt6.QtGui": qtgui,
-                                      "krita": krita, "_cad13_package": cls.package,
-                                      "_cad13_package.bridge_qt": bridge}):
-            cls.ops = load_module("_cad13_package.ops", ROOT / "core/krita_cowork/ops.py")
-            with patch.dict(sys.modules, {"_cad13_package.ops": cls.ops}):
-                cls.server = load_module("_cad13_package.server", ROOT / "core/krita_cowork/server.py")
+                                      "krita": krita, "_snapshot_package": cls.package,
+                                      "_snapshot_package.bridge_qt": bridge}):
+            cls.ops = load_module("_snapshot_package.ops", ROOT / "core/krita_cowork/ops.py")
+            with patch.dict(sys.modules, {"_snapshot_package.ops": cls.ops}):
+                cls.server = load_module("_snapshot_package.server", ROOT / "core/krita_cowork/server.py")
 
     def test_ops_thin_wrappers_and_error_mapping(self):
-        fake = types.ModuleType("_cad13_package.snapshot")
+        fake = types.ModuleType("_snapshot_package.snapshot")
         fake.SnapshotError = snapshot.SnapshotError
         fake.export_snapshot = Mock(return_value={"paired": True})
-        with patch.dict(sys.modules, {"_cad13_package": self.package, "_cad13_package.snapshot": fake}):
+        with patch.dict(sys.modules, {"_snapshot_package": self.package, "_snapshot_package.snapshot": fake}):
             for fn, args, expected in [
                 (self.ops.doc_export, ("p.png",), {"projection_path": "p.png", "overwrite": False, "expected_document_token": None}),
                 (self.ops.doc_selection_png, ("m.png",), {"selection_path": "m.png", "selection_mode": "selection", "overwrite": False, "expected_document_token": None}),
@@ -597,7 +597,7 @@ class Plumbing(unittest.TestCase):
                 http.assert_called_once_with(cwb.Krita + route, expected, timeout=120)
 
     def test_help_offline_no_cache(self):
-        with tempfile.TemporaryDirectory(prefix="cad13-help-") as tmp:
+        with tempfile.TemporaryDirectory(prefix="snapshot-help-") as tmp:
             target = Path(tmp) / "absent"
             for args in (["--help"], ["export", "--help"], ["selection-png", "--help"], ["snapshot", "--help"]):
                 with patch.object(cwb, "http", side_effect=AssertionError("network")), \

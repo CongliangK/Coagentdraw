@@ -1,4 +1,4 @@
-"""CAD-28 offline layout fixtures; teaching PNGs, not a real character/Krita case."""
+"""Offline layout fixtures; teaching PNGs, not a real character/Krita case."""
 import builtins
 import contextlib
 import importlib.util
@@ -23,7 +23,7 @@ PIL_AVAILABLE = importlib.util.find_spec('PIL') is not None
 
 class Layout(unittest.TestCase):
     def setUp(self):
-        temp = tempfile.TemporaryDirectory(prefix='cad28-layout-')
+        temp = tempfile.TemporaryDirectory(prefix='layout-layout-')
         self.addCleanup(temp.cleanup)
         self.root = Path(temp.name)
         self.inputs = self.root / 'teaching'
@@ -114,7 +114,7 @@ class Layout(unittest.TestCase):
             with self.assertRaises(ValueError):
                 layout.plan(str(self.spec_path))
         path.write_bytes(good)
-        # Admission uses CAD-14 before allocating/decoding large buffers.
+        # Admission uses placement before allocating/decoding large buffers.
         placement = layout._pure('placement')
         with self.assertRaises(ValueError):
             placement.plan_placement(8192, 8192, 100, 160, 'fit_canvas')
@@ -337,7 +337,7 @@ class Client(unittest.TestCase):
             return real_import(name, *args, **kwargs)
         args_list = [['--help'], ['layout', '--help']]
         args_list += [['layout', cmd, '--help'] for cmd in ('fixture', 'plan', 'render', 'prepare')]
-        with tempfile.TemporaryDirectory(prefix='cad28-help-') as temp:
+        with tempfile.TemporaryDirectory(prefix='layout-help-') as temp:
             for args in args_list:
                 with patch('builtins.__import__', side_effect=no_layout), patch.object(cwb, 'http', side_effect=AssertionError('HTTP')):
                     with contextlib.redirect_stdout(io.StringIO()), self.assertRaises(SystemExit) as error:
