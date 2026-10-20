@@ -200,17 +200,20 @@ class DesignSkillBundleTests(unittest.TestCase):
                      "多项核心要素可以协同承载同一核心命题", "允许反馈后推翻或重构"]:
             self.assertIn(term, skill)
 
-    def test_shape_language_precedes_concrete_components(self):
+    def test_shape_language_supports_collage_without_blocking_entry(self):
         text, _ = self.phase_one_tables()
-        sequence = "主形与辅形 → 整身剪影与主体构成 → 依附结构 → 表面细节"
+        sequence = "整身剪影与主体构成 → 依附结构 → 表面细节"
         self.assertIn(sequence, text)
         self.assertLess(text.index(sequence), text.index("核心是一组"))
         for term in ["圆、三角、方形", "方向、比例、分布", "轮廓节奏",
-                     "再选择身体、服装与装备实现这些大形", "情绪倾向结合重心、曲直与语境判断"]:
+                     "调整身体、服装与装备形成的大形", "情绪倾向结合重心、曲直与语境判断",
+                     "当前锚点可以直接带入检索和拼贴", "不必先完成整卡、抽象几何方案或独立剪影"]:
             self.assertIn(term, text)
         skill = (DESIGN / "SKILL.md").read_text(encoding="utf-8")
-        self.assertLess(skill.index("先讨论形状语言"), skill.index("再提出可讨论的整身粗方案"))
-        self.assertIn("不把几何形状机械等同于人格", skill)
+        for term in ["有锚点就能进入试拼", "形状语言用于分析与调整",
+                     "不把抽象几何讨论作为找图的前置", "不把几何形状机械等同于人格",
+                     "拼贴任务同时读取02和04", "进入清晰主稿时再读05"]:
+            self.assertIn(term, skill)
 
     def test_agents_and_readme_link_to_skill(self):
         for name in ["AGENTS.md", "README.md"]:
