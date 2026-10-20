@@ -2,7 +2,7 @@
 
 ## 范围与证据边界
 
-`/layer/add` 支持 `parent_id`、`above`、`offset_x/y` 与三种导入模式。仅新建透明 `paintLayer`，不覆盖、删除、移动或合并旧层；画布尺寸不变。当前仅完成纯 Python 映射与 Qt/Krita 替身回归，**没有运行真实 Qt 解码或 Krita 通道/像素落点验收**。
+`/layer/add` 支持 `parent_id`、`above`、`offset_x/y` 与三种导入模式。仅新建透明 `paintLayer`，不覆盖、删除、移动或合并旧层；画布尺寸不变。映射与资源保护有纯 Python / Qt/Krita 替身回归；BGRA 通道顺序已有彩色样本实机核对，**三种模式的完整 Qt 解码、像素落点与保存重开验收仍未完成**。
 
 不提供模型编辑、选区自动回填或文档条件写入。快照 token 不接入此写接口，也不是安全写回凭证：接口仍在主线程操作当时的活动文档，调用前人工确认文档；网络超时不能证明未发生写入。
 
@@ -77,7 +77,7 @@ sy = floor((2*v+1)*Sh/(2*H))
 - `transparent_margins=[左,上,右,下]` 表示新层写入矩形之外的透明范围，不表示源图内部透明边缘；
 - `resources` 包含源像素、`decoded_rgba_bytes`、输出采样/字节、`estimated_working_bytes`，实际导入时包含转换后的真实行 stride；纯计划使用紧密 RGBA stride。它们是准入估算，不是测量值。
 
-所有参数类型、尺寸、边界、父组/同级关系、QImage 转换及缓冲区校验在创建节点前完成。保留 RGBA/U8 文档守卫、`Format_RGBA8888`、`constBits().asarray(bytesPerLine*height)` 与逐行去 padding，在写入 Krita 的 `setPixelData` 前将 RGBA 转为 BGRA（见 `snapshot.swap_rb`），QImage 侧仍使用 RGBA。先创建/挂树并回读父组与 above 顺序，再 `setPixelData`，检查返回值，再回读树。失败会报错；写入失败后可能留下新空层/部分层，**不自动删除任何层或重试**，不承诺事务回滚。返回成功也不等于已做 Krita 像素 readback。
+所有参数类型、尺寸、边界、父组/同级关系、QImage 转换及缓冲区校验在创建节点前完成。保留 RGBA/U8 文档守卫、`Format_RGBA8888`、`constBits().asarray(bytesPerLine*height)` 与逐行去 padding；缺少或无法读取该 PyQt6 指针接口时，在建层前报错。在写入 Krita 的 `setPixelData` 前将 RGBA 转为 BGRA（见 `snapshot.swap_rb`），QImage 侧仍使用 RGBA。先创建/挂树并回读父组与 above 顺序，再 `setPixelData`，检查返回值，再回读树。失败会报错；写入失败后可能留下新空层/部分层，**不自动删除任何层或重试**，不承诺事务回滚。返回成功也不等于已做 Krita 像素 readback。
 
 ## CLI / HTTP 示例
 

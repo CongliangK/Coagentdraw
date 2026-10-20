@@ -177,4 +177,4 @@ python3 core/cwb.py save 作品.kra
 - root 层无 `x()/y()`,统一用 `bounds()`;无 `setDirty`
 - PyQt6 `constBits()` 是 voidptr,需 `asarray(bpl*h)`
 - `pixelData`/`setPixelData` 实测为 BGRA 字节序(2026-10, 6.0.4 AppImage, 彩色样本+画布对照);投影导出与图层导入均在边界交换 B/R
-- Krita AppImage 内置 Python 文件系统编码可能非 UTF-8(实测 str 非ASCII路径 ENOENT);插件文件 I/O 用显式 UTF-8 字节路径
+- Krita AppImage 内置 Python 文件系统编码可能非 UTF-8(实测 str 非ASCII路径 ENOENT);PNG 导入预读与导出使用显式 UTF-8 字节路径，KRA 保存仍依赖 Krita 的 `saveAs` 接口

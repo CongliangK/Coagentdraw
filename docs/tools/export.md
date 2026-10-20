@@ -69,4 +69,4 @@ python3 core/cwb.py export-project /绝对/项目目录 /绝对/交付.zip \
 PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests -v
 ```
 
-所有实测仅离线 fixture；fixture KRA 字节不是有效 Krita 作品，不可当成真实重开证据。后续真实验收须单独使用已授权真实项目：阶段 A 保存/重开真实 KRA 并核对 PNG 与说明；阶段 B 再核对完整八阶段及最终插画。本改动不执行安装、服务写操作或模型测试。
+所有实测仅离线 fixture；fixture KRA 字节不是有效 Krita 作品，不可当成真实重开证据。实机验收须使用已授权的专用测试文档，保存/重开 KRA 并核对 PNG 与说明；真实创作验收再核对对应阶段的视觉成果与作者确认。验证职责沿用 A 离线、B 实机、C 创作的划分，见[能力说明](<../../design/工具能力与验证.md>)。

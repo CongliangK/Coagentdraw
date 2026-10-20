@@ -474,7 +474,8 @@ class ImportOperations(unittest.TestCase):
         self.assertEqual(self.doc.created[-1].pixels[3:], (4, 2))
 
     def test_bad_buffers_and_conversion_fail_before_creation(self):
-        with patch.object(FixtureImage, 'constBits', return_value=b'short'):
+        pointer = types.SimpleNamespace(asarray=lambda size: b'short')
+        with patch.object(FixtureImage, 'constBits', return_value=pointer):
             with self.assertRaises(groups.ops.OpError):
                 groups.ops.layer_add('fixture.png', 'bad')
         null = Mock()
@@ -482,6 +483,15 @@ class ImportOperations(unittest.TestCase):
         with patch.object(FixtureImage, 'convertToFormat', return_value=null):
             with self.assertRaises(groups.ops.OpError):
                 groups.ops.layer_add('fixture.png', 'bad')
+        self.assertEqual(self.doc.created, [])
+
+    def test_pyqt6_pointer_api_is_required_before_creation(self):
+        for pointer in (b'x' * 160,
+                        types.SimpleNamespace(asarray=Mock(side_effect=AttributeError('broken pointer')))):
+            with self.subTest(pointer=type(pointer).__name__), \
+                    patch.object(FixtureImage, 'constBits', return_value=pointer):
+                with self.assertRaisesRegex(groups.ops.OpError, r'constBits\(\).asarray\(\)'):
+                    groups.ops.layer_add('fixture.png', 'bad')
         self.assertEqual(self.doc.created, [])
 
 

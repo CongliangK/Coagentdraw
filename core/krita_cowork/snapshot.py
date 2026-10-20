@@ -1,7 +1,7 @@
 """Main-thread, full-canvas projection/selection snapshots.
 
 No Krita/Qt imports: the byte codec and filesystem contract are offline-testable.
-The caller MUST run export() in the existing MainThreadBridge callback. This is
+The caller MUST run export_snapshot() in the existing MainThreadBridge callback. This is
 not a lock against Krita worker threads; waitForDone/refreshProjection fence the
 projection before sampling. No event loop is pumped between the two reads.
 """

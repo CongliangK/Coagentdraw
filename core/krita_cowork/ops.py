@@ -339,8 +339,8 @@ def layer_add(png_path, name, above_layer_id=None, offset_x=0, offset_y=0,
         raw = img.constBits()
         try:
             raw = raw.asarray(bpl * sh)  # PyQt6: voidptr 需显式取尺寸; not a bytes copy
-        except AttributeError:
-            pass  # 保留既有可切片缓冲区路径
+        except (AttributeError, TypeError, ValueError) as exc:
+            raise OpError("PyQt6 constBits().asarray() 缓冲区读取失败") from exc
         buf = resize_rgba(raw, mapping, bytes_per_line=bpl, budget=budget)
         del raw, img
         w, h = mapping["output_size"]

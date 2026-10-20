@@ -43,7 +43,7 @@ python3 core/cwb.py snapshot /tmp/projection.png /tmp/selection.png --overwrite 
 
 - `capture_id`：每次采样随机唯一；**不是**文档身份。
 - `document_token`：当前服务会话的保守文档 token，见下一节；不是内容版本号。
-- `token_contract = "session/notifier-epoch/root-uuid-v1"`、`token_lifecycle_runtime_verified = false`：本交付尚未证明实机生命周期信号，不得忽略该验收状态。
+- `token_contract = "session/notifier-epoch/root-uuid-v1"`、`token_lifecycle_runtime_verified = false`：实机生命周期信号尚未验证，不得忽略该验收状态。
 - `paired`：仅配对端点完整成功时为 `true`；单独请求为 `false`。
 - `capture_scope`：配对为 `one-main-thread-callback`，单独为 `single-export-only`。
 - `width`、`height`、`origin = {"x": 0, "y": 0}`：文档整画布，坐标不随选区或节点 bounds 移动。
