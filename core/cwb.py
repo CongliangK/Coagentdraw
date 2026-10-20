@@ -45,7 +45,7 @@ def add_project_parser(sub):
     commands = parser.add_subparsers(dest="project_cmd", required=True)
     p = commands.add_parser("init", help="初始化 schema2/workflow 索引；不创建空表/阶段目录/KRA")
     p.add_argument("name")
-    p.add_argument("--root", help="项目目录；默认仓库 _本地暂存/<项目名>")
+    p.add_argument("--root", help="项目目录；默认仓库 项目/<项目名>（整目录不入 Git）")
     for command in ("status", "migration-plan", "upgrade", "edit", "stage", "record", "idea", "document", "decision"):
         p = commands.add_parser(command)
         p.add_argument("root", help="项目目录；相对于当前工作目录")

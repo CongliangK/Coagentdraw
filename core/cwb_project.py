@@ -760,7 +760,7 @@ def run(args):
         if args.root is None:
             if args.name in (".", "..") or any(c in args.name for c in ("/", "\\", ":", "\x00")):
                 raise ProjectError("默认目录的项目名必须是单个目录名；可用 --root 指定目录")
-            root = Path(__file__).resolve().parents[1] / "_本地暂存" / args.name
+            root = Path(__file__).resolve().parents[1] / "项目" / args.name
         else:
             root = args.root
         result = initialize(root, args.name)

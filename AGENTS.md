@@ -2,7 +2,7 @@
 
 ## 项目定位
 
-本仓库是 Krita × ComfyUI × 智能体的复合绘画工作台。公开仓库只包含内核程序（`core/`）、设计工作流文档（`design/`）与 ComfyUI 工作流（`comfyui/`）；绘画源文件、原始调研素材与子智能体调研保留在本地 `_本地暂存/`，不入库。默认使用中文沟通和撰写文档。
+本仓库是 Krita × ComfyUI × 智能体的复合绘画工作台。公开仓库只包含内核程序（`core/`）、设计工作流文档（`design/`）与 ComfyUI 工作流（`comfyui/`）；真实创作的全部任务、资料、绘画源文件、候选与导出默认保留在仓库根目录 `项目/<项目名>/`，整目录不入库；原有 `_本地暂存/` 保留作本地资料区，不自动迁移。默认使用中文沟通和撰写文档。
 
 开始任务前阅读 [README.md](<README.md>)，检查 `git status --short`，区分已有变更和本次任务的改动；不得覆盖用户未提交的工作。
 
@@ -21,6 +21,7 @@
 - [core/](<core/>)：内核程序。[krita_cowork](<core/krita_cowork/>) 为 Krita 进程内插件：[bridge_qt.py](<core/krita_cowork/bridge_qt.py>) 负责主线程桥接，[server.py](<core/krita_cowork/server.py>) 负责 HTTP 控制面，[ops.py](<core/krita_cowork/ops.py>) 负责文档与图层操作；[cwb.py](<core/cwb.py>) 为连接 Krita 与 ComfyUI 的命令行客户端；[install.sh](<core/install.sh>) 与[插件注册文件](<core/kritapykrita_krita_cowork.desktop>) 负责本机安装和启用配置。
 - [design/](<design/>)：设计工作流文档。[唯一现行正式执行规范](<design/Krita中枢创作流程_正式执行规范.md>)、[八阶段执行手册](<design/执行手册/README.md>)（从[角色设计意图卡](<design/执行手册/01_文本创作起点.md>)到三视图及独立插画）与[调研报告](<design/调研报告/README.md>)。
 - [comfyui/](<comfyui/>)：ComfyUI 工作流（API 格式 JSON）与依赖说明。
+- `项目/<项目名>/`：真实创作的默认根目录，全部内容由根目录 `.gitignore` 排除。任务记录、调研、KRA、候选、sidecar、快照与导出应放在对应项目内；不自动生成整套空目录。未经作者明确授权不向云端服务发送项目内容，不贴进公开 Issue；Git 忽略不是网络隔离或备份。已有项目不自动搬迁。
 - `_本地暂存/`：不入库的本地资料——绘画源文件（`.kra`）、角色设计调研原始素材、子智能体调研全部实测记录与图片。已被 `.gitignore` 排除，不是可随意清理的目录。
 
 ## 代码与运行约束

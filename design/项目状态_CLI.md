@@ -13,7 +13,7 @@ python3 core/cwb.py project init "测试项目" --root /明确/项目目录
 python3 core/cwb.py project status /明确/项目目录
 ```
 
-省略 `--root` 时为**仓库**下 `_本地暂存/<项目名>/`，项目名须单个目录名；其他 `root` 相对调用者工作目录。所有示例均需改为已授权项目，开发只在临时 fixture 中验证。
+省略 `--root` 时为**仓库**下 `项目/<项目名>/`，项目名须单个目录名，不随调用者工作目录改变；显式 `--root` 的相对路径仍相对调用者工作目录。真实创作的任务记录、资料、KRA、候选、导出和状态索引均放入对应项目目录，整棵目录由仓库 [.gitignore](<../.gitignore>) 排除。结构建议与隐私边界见 [本地项目约定](<../README.md#本地设计项目>)。已有 `_本地暂存/` 项目不自动迁移，继续用明确路径访问；不要同名初始化来代替打开旧项目。所有示例均需改为已授权项目，开发只在临时 fixture 中验证。
 
 `current_stage` 仅关注位置，不推断前后阶段完成。`stages` 按新01—08：`text_seeds`、`research_imagination`、`concept_selection`、`character_exploration`、`character_resolution`、`turnaround`、`illustration_planning`、`illustration_production`。`stage_history` 每条携带 workflow，迁移保留旧历史旧含义。
 

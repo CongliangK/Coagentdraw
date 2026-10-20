@@ -38,6 +38,28 @@ class ProjectTests(unittest.TestCase):
         target.write_bytes(content)
         return path
 
+    def test_default_root_is_repository_projects_not_cwd(self):
+        from argparse import Namespace
+        fake_module = Path(self.temp.name) / "checkout" / "core" / "cwb_project.py"
+        args = Namespace(project_cmd="init", root=None, name="设计 空格")
+        with mock.patch.object(project, "__file__", str(fake_module)):
+            project.run(args)
+        expected = fake_module.parents[1] / "项目" / args.name
+        self.assertEqual(project.read_state(expected)[0]["name"], args.name)
+        self.assertFalse((fake_module.parents[1] / "_本地暂存").exists())
+
+    def test_explicit_root_is_not_redirected(self):
+        from argparse import Namespace
+        target = Path(self.temp.name) / "explicit"
+        project.run(Namespace(project_cmd="init", root=target, name="显式目录"))
+        self.assertEqual(project.read_state(target)[0]["name"], "显式目录")
+
+    def test_default_root_rejects_path_names(self):
+        from argparse import Namespace
+        for name in (".", "..", "../escape", "a/b", "a\\b", "a:b"):
+            with self.subTest(name=name), self.assertRaises(project.ProjectError):
+                project.run(Namespace(project_cmd="init", root=None, name=name))
+
     def test_restart_relative_paths_unicode_and_metadata(self):
         self.cli("edit", self.root.name, "--intent", "完整手工意图", "--pillar", "仪式", "--pillar", "克制", "--anchor", "水彩", cwd=self.root.parent)
         self.cli("stage", self.root, 2, "--note", "开始调研")
