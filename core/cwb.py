@@ -46,14 +46,11 @@ def add_project_parser(sub):
     p = commands.add_parser("init", help="初始化 schema2/workflow 索引；不创建空表/阶段目录/KRA")
     p.add_argument("name")
     p.add_argument("--root", help="项目目录；默认仓库 项目/<项目名>（整目录不入 Git）")
-    for command in ("status", "migration-plan", "upgrade", "edit", "stage", "record", "idea", "document", "decision"):
+    for command in ("status", "edit", "stage", "record", "idea", "document", "decision"):
         p = commands.add_parser(command)
         p.add_argument("root", help="项目目录；相对于当前工作目录")
-        if command not in ("status", "migration-plan"):
-            p.add_argument("--expect-revision", type=int, required=command == "upgrade", help="拒绝基于过期状态的写入；upgrade 必填")
-        if command == "upgrade":
-            p.add_argument("--source-sha256", required=True, help="migration-plan 返回的原状态摘要")
-            p.add_argument("--authorize", required=True, help="明确升级授权的实际来源/人工转录；不是身份认证")
+        if command != "status":
+            p.add_argument("--expect-revision", type=int, help="拒绝基于过期状态的写入")
         if command == "edit":
             p.add_argument("--intent", help="完整意图卡文本（可手工填写）")
             p.add_argument("--pillar", action="append", help="替换设计支柱列表，可重复")
@@ -116,20 +113,17 @@ def _opacity_arg(value):
 def add_stage_parser(sub):
     parser = sub.add_parser("stage", help="八阶段组预设（独立身份 sidecar；不修改项目状态）")
     commands = parser.add_subparsers(dest="stage_cmd", required=True)
-    for command in ("setup", "import-diagnostic", "status"):
+    for command in ("setup", "status"):
         p = commands.add_parser(command)
         p.add_argument("--state", required=True, help="独立 *.cwb-stage.json 文件；保留并备份")
         if command == "setup":
             p.add_argument("number", type=int, choices=range(1, 9))
-            p.add_argument("--workflow", choices=("legacy-eight-stage-v1", "krita-character-illustration-v1"),
-                           help="新 sidecar 默认旧流程；已有 sidecar 省略则沿用，不自动迁移")
+            p.add_argument("--workflow", choices=("krita-character-illustration-v1",),
+                           help="工作流固定为 krita-character-illustration-v1")
             p.add_argument("--role", choices=("ideation", "character", "turnaround", "illustration"),
-                           help="新 workflow 首次必填；按文档角色建组，不在一文档建八阶段")
+                           help="首次必填；按文档角色建组，不在一文档建八阶段")
         if command != "status":
             p.add_argument("--document", required=True, help="已保存的活动 .kra 绝对或相对路径")
-        if command == "import-diagnostic":
-            p.add_argument("png", help="显式提供 #18 已有 PNG；不生成诊断图")
-            p.add_argument("--name", default="诊断 PNG")
 
 
 def add_compare_parser(sub):
@@ -236,7 +230,7 @@ def add_candidates_parser(sub):
 
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--version", action="version", version="cwb: project schema1(read-only)/2; workflow krita-character-illustration-v1; stage sidecar1/2")
+    ap.add_argument("--version", action="version", version="cwb: project schema2; workflow krita-character-illustration-v1; stage sidecar2")
     sub = ap.add_subparsers(dest="cmd", required=True)
 
     sub.add_parser("ping")
@@ -262,11 +256,8 @@ def main(argv=None):
     p.add_argument("--above"); p.add_argument("--x", type=int, default=0)
     p.add_argument("--y", type=int, default=0)
     p.add_argument("--parent", help="父级组 ID；省略则挂到根")
-    placement = p.add_mutually_exclusive_group()
-    placement.add_argument("--mode", choices=("keep_size", "fit_canvas", "insert_at_offset"),
-                           help="原尺寸原点 / 等比缩小居中（不放大） / 原尺寸偏移；默认兼容已有 offset")
-    placement.add_argument("--fit-canvas", action="store_true", default=None,
-                           help="--mode fit_canvas 的兼容别名，不可搭配非零 --x/--y")
+    p.add_argument("--mode", choices=("keep_size", "fit_canvas", "insert_at_offset"),
+                           help="原尺寸原点 / 等比缩小居中（不放大） / 原尺寸偏移；默认按是否有非零偏移选择原点或偏移")
     p = sub.add_parser("group", help="创建空图层组（可嵌套）")
     p.add_argument("name")
     p.add_argument("--parent", help="父级组 ID；省略则挂到根")
@@ -374,8 +365,6 @@ def main(argv=None):
                    "above": a.above, "offset_x": a.x, "offset_y": a.y, "parent_id": a.parent}
         if a.mode is not None:
             payload["mode"] = a.mode
-        if a.fit_canvas is not None:
-            payload["fit_canvas"] = a.fit_canvas
         print(json.dumps(http(Krita + "/layer/add", payload, timeout=120), ensure_ascii=False))
     elif a.cmd == "group":
         print(json.dumps(http(Krita + "/layer/group", {

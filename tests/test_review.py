@@ -324,7 +324,7 @@ class ReviewTests(unittest.TestCase):
         with patch.object(review, "MAX_PIXELS", 10), self.assertRaises(ValueError):
             self.prepare()
 
-    def test_png_container_negatives_prepare_and_legacy_import(self):
+    def test_png_container_negatives_prepare_and_import(self):
         for name, data in broken_pngs().items():
             with self.subTest(name=name, phase="prepare"):
                 self.images[0].write_bytes(data)
@@ -332,9 +332,9 @@ class ReviewTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     self.prepare()
                 self.assertFalse(self.prepared.exists())
-            # Model an internally consistent legacy prepared bundle, not a hash
+            # Model an internally consistent malformed prepared bundle, not a hash
             # mismatch. Only fixture creation bypasses PNG validation; import does not.
-            self.prepared = self.root / (name + "-legacy")
+            self.prepared = self.root / (name + "-malformed")
             self.output = self.root / (name + "-imported")
             with patch.object(review, "_png_dimensions", return_value=[12, 10]):
                 value = self.response()

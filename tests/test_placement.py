@@ -75,23 +75,13 @@ class Geometry(unittest.TestCase):
         self.assertEqual(p['edge_transform'], {'scale_x': [8, 13], 'scale_y': [5, 9],
                                              'translate': [0, 1]})
 
-    def test_legacy_offsets_and_boolean_alias_have_one_interpretation(self):
+    def test_default_offsets_and_explicit_modes(self):
         base = (3, 2, 8, 7)
         self.assertEqual(placement.plan_placement(*base)['mode'], 'keep_size')
         self.assertEqual(placement.plan_placement(*base, offset_x=1)['mode'], 'insert_at_offset')
-        self.assertEqual(placement.plan_placement(*base, fit_canvas=True),
-                         placement.plan_placement(*base, mode='fit_canvas'))
-        self.assertEqual(placement.plan_placement(*base, fit_canvas=False, offset_y=1),
-                         placement.plan_placement(*base, mode='insert_at_offset', offset_y=1))
-        self.assertEqual(placement.plan_placement(*base, mode='fit_canvas', fit_canvas=True),
-                         placement.plan_placement(*base, mode='fit_canvas'))
         for kw in ({'mode': 'keep_size', 'offset_x': 1},
                    {'mode': 'fit_canvas', 'offset_y': 1},
-                   {'fit_canvas': True, 'offset_x': 1},
-                   {'mode': 'keep_size', 'fit_canvas': True},
-                   {'mode': 'fit_canvas', 'fit_canvas': False},
-                   {'mode': 'crop_at_bbox'}, {'mode': 'other'}, {'mode': []},
-                   {'fit_canvas': 1}, {'fit_canvas': 'false'}):
+                   {'mode': 'crop_at_bbox'}, {'mode': 'other'}, {'mode': []}):
             with self.subTest(kw=kw), self.assertRaises(placement.PlacementError):
                 placement.plan_placement(*base, **kw)
 
@@ -397,7 +387,7 @@ class ImportOperations(unittest.TestCase):
 
     def test_fit_uses_rounded_plan_and_returns_mapping(self):
         with patch.object(self.doc, 'width', return_value=4), patch.object(self.doc, 'height', return_value=3):
-            result = groups.ops.layer_add('fixture.png', 'fit', fit_canvas=True)
+            result = groups.ops.layer_add('fixture.png', 'fit', mode='fit_canvas')
         expected = b''.join(pixel(fixture(), 7, x, y) for y in (1, 3) for x in (0, 2, 4, 6))
         self.assertEqual(self.doc.created[-1].pixels, (snapshot.swap_rb(expected, 4, 2), 0, 0, 4, 2))
         expected_plan = placement.plan_placement(7, 5, 4, 3, mode='fit_canvas')
@@ -411,8 +401,7 @@ class ImportOperations(unittest.TestCase):
                 with self.subTest(value=value, key=key), self.assertRaises(groups.ops.OpError):
                     groups.ops.layer_add('fixture.png', 'bad', **{key: value})
         for kw in ({'offset_x': 10}, {'offset_y': 12}, {'mode': 'crop_at_bbox'},
-                   {'mode': 'keep_size', 'offset_x': 1}, {'fit_canvas': 'true'},
-                   {'mode': 'fit_canvas', 'fit_canvas': False}, {'parent_id': True},
+                   {'mode': 'keep_size', 'offset_x': 1}, {'parent_id': True},
                    {'above_layer_id': []}, {'name': ''}, {'png_path': None}):
             args = {'png_path': 'fixture.png', 'name': 'bad', **kw}
             with self.subTest(kw=kw), self.assertRaises(groups.ops.OpError):
@@ -497,18 +486,18 @@ class ImportOperations(unittest.TestCase):
 
 
 class Contract(unittest.TestCase):
-    def test_cli_mapping_and_legacy_payload(self):
+    def test_cli_mapping_and_default_payload(self):
         for args, extra in [(['--mode', 'fit_canvas'], {'mode': 'fit_canvas'}),
                             (['--mode', 'insert_at_offset', '--x', '3', '--y', '4'],
                              {'mode': 'insert_at_offset', 'offset_x': 3, 'offset_y': 4}),
-                            (['--fit-canvas'], {'fit_canvas': True}), ([], {})]:
+                            ([], {})]:
             with patch.object(groups.cwb, 'http', return_value={}) as http, contextlib.redirect_stdout(io.StringIO()):
                 groups.cwb.main(['add', 'fixture.png', 'paint', '--parent', 'g', '--above', 'a', *args])
             expected = {'png_path': os.path.abspath('fixture.png'), 'name': 'paint',
                         'parent_id': 'g', 'above': 'a', 'offset_x': 0, 'offset_y': 0, **extra}
             http.assert_called_once_with(groups.cwb.Krita + '/layer/add', expected, timeout=120)
         for args in (['--x', '1.9'], ['--mode', 'crop_at_bbox'],
-                     ['--mode', 'keep_size', '--fit-canvas']):
+                     ['--mode', 'unknown']):
             with patch.object(groups.cwb, 'http') as http, contextlib.redirect_stderr(io.StringIO()):
                 with self.assertRaises(SystemExit):
                     groups.cwb.main(['add', 'fixture.png', 'p', *args])
@@ -524,12 +513,15 @@ class Contract(unittest.TestCase):
                 patch.object(groups.ops, '_active_doc', return_value=doc), \
                 patch.object(groups.ops, 'QImage', FixtureImage), virtual_fixture_png():
             body = {'png_path': 'fixture.png', 'name': 'paint', 'mode': 'insert_at_offset',
-                    'offset_x': 2, 'offset_y': 3, 'fit_canvas': False}
+                    'offset_x': 2, 'offset_y': 3}
             status, result = routing.request('/layer/add', body)
             self.assertEqual(status, 200)
             self.assertEqual(result['placement']['origin'], [2, 3])
             self.assertEqual(doc.created[-1].pixels,
                          (snapshot.swap_rb(fixture(), 7, 5), 2, 3, 7, 5))
+            count = len(doc.created)
+            self.assertEqual(routing.request('/layer/add', {**body, 'unexpected': True})[0], 400)
+            self.assertEqual(len(doc.created), count)
             for value in (-0.5, 1.9, True, math.inf, math.nan, 10**200):
                 count = len(doc.created)
                 self.assertEqual(routing.request('/layer/add', {**body, 'offset_x': value})[0], 400)

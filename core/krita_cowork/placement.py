@@ -78,26 +78,22 @@ def resource_estimate(sw, sh, w, h, bytes_per_line=None):
             "estimated_working_bytes": estimated}
 
 
-def resolve_mode(mode, fit_canvas, offset_x, offset_y):
+def resolve_mode(mode, offset_x, offset_y):
     x = integer(offset_x, "offset_x")
     y = integer(offset_y, "offset_y")
-    if fit_canvas is not None and type(fit_canvas) is not bool:
-        raise PlacementError("fit_canvas 兼容别名必须是 bool")
-    legacy = "insert_at_offset" if x or y else "keep_size"
+    default_mode = "insert_at_offset" if x or y else "keep_size"
     if mode is None:
-        mode = "fit_canvas" if fit_canvas is True else legacy
+        mode = default_mode
     if not isinstance(mode, str) or mode not in MODES:
         raise PlacementError("mode 仅支持 keep_size/fit_canvas/insert_at_offset；crop_at_bbox 尚未实现")
-    if fit_canvas is not None and (mode == "fit_canvas") != fit_canvas:
-        raise PlacementError("mode 与 fit_canvas 别名冲突")
     if mode != "insert_at_offset" and (x or y):
         raise PlacementError("非零 offset 仅用于 insert_at_offset；不与居中/原点行为混用")
     return mode, x, y
 
 
 def plan_placement(source_width, source_height, canvas_width, canvas_height,
-                   mode=None, offset_x=0, offset_y=0, fit_canvas=None):
-    mode, x, y = resolve_mode(mode, fit_canvas, offset_x, offset_y)
+                   mode=None, offset_x=0, offset_y=0):
+    mode, x, y = resolve_mode(mode, offset_x, offset_y)
     sw, sh, _ = source_layout(source_width, source_height)
     cw = integer(canvas_width, "canvas_width", 1)
     ch = integer(canvas_height, "canvas_height", 1)
@@ -222,7 +218,7 @@ def _fs_bytes(path):
 
 
 def prepare_png(path, canvas_width, canvas_height, mode=None, offset_x=0,
-                offset_y=0, fit_canvas=None, *, budget=None):
+                offset_y=0, *, budget=None):
     """Read one bounded regular-file snapshot; no path-based Qt second read."""
     budget = budget or PreprocessBudget()
     budget.check("PNG 打开前")
@@ -238,7 +234,7 @@ def prepare_png(path, canvas_width, canvas_height, mode=None, offset_x=0,
             header = stream.read(33)
             sw, sh, _, _ = _png_header(header)
             mapping = plan_placement(sw, sh, canvas_width, canvas_height,
-                                     mode, offset_x, offset_y, fit_canvas)
+                                     mode, offset_x, offset_y)
             budget.check("PNG 文件读取前")
             stream.seek(0)
             encoded = stream.read(MAX_PNG_BYTES + 1)
@@ -266,7 +262,7 @@ def packed_rgba(raw, width, height, bytes_per_line, *, budget=None):
         try:
             view = memoryview(raw).cast("B")
         except TypeError:
-            result = bytes(raw[:w * h * 4])  # legacy sliceable buffer fallback
+            result = bytes(raw[:w * h * 4])  # Sliceable buffers without the buffer protocol.
         else:
             result = view[:w * h * 4].tobytes()  # one immutable copy, not bytearray + bytes
         budget.check("连续像素打包后")

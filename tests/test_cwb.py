@@ -111,7 +111,7 @@ class Tests(unittest.TestCase):
             self.assertEqual(graph['encode']['inputs']['prompt'], prompt)
             self.assertEqual(cc.effective(graph, contract)['prompt'], prompt)
 
-    def test_legacy_ksampler_parameters_and_replay(self):
+    def test_custom_ksampler_parameters_and_replay(self):
         graph, contract = copy.deepcopy(self.graph), copy.deepcopy(self.contract)
         graph['sampler']['class_type'] = 'KSampler'
         graph['sampler']['inputs'] = {
@@ -121,9 +121,9 @@ class Tests(unittest.TestCase):
         }
         for name in ('seed', 'steps', 'cfg', 'denoise'):
             contract['parameters'][name] = {'node': 'sampler', 'input': name, 'class_type': 'KSampler'}
-        cc.write_json(self.root / 'legacy.json', graph)
-        cc.write_json(self.root / 'legacy.contract.json', contract)
-        self.graph, self.contract = cc.prepare(self.root, 'legacy.json', 't2i', {'steps': 10, 'denoise': .5})
+        cc.write_json(self.root / 'custom.json', graph)
+        cc.write_json(self.root / 'custom.contract.json', contract)
+        self.graph, self.contract = cc.prepare(self.root, 'custom.json', 't2i', {'steps': 10, 'denoise': .5})
         record, path = self.run_graph()
         loaded, saved_contract, old = cc.load_replay(path, BASE)
         replayed, _ = cc.execute(loaded, saved_contract, self.root / 'runs', BASE, transport=self.fake, replay=old)
@@ -147,14 +147,14 @@ class Tests(unittest.TestCase):
         self.assertFalse(self.fake.calls)
         self.assertFalse((self.root / 'runs').exists())
 
-    def test_legacy_graph_without_preprocessing_remains_supported(self):
+    def test_custom_graph_without_preprocessing(self):
         graph, contract = cc.prepare(WF, 'wf_qwen21_edit_api.json', 'edit', {})
         del contract['image_preprocessing']
         del graph['scale1']
         graph['encode']['inputs']['images']['image_1'] = ['load1', 0]
         cc.validate_contract(graph, contract)
         self.graph, self.contract = graph, contract
-        image = self.root / 'legacy.png'; image.write_bytes(PNG)
+        image = self.root / 'custom.png'; image.write_bytes(PNG)
         record, path = self.run_graph(inputs={'image1': image})
         cc.load_replay(path, BASE)
         self.assertEqual(record['status'], 'completed')

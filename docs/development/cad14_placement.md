@@ -2,23 +2,22 @@
 
 ## 范围与证据边界
 
-扩展既有 `/layer/add`，不替代已有 `parent_id`、`above`、`offset_x/y`。仅新建透明 `paintLayer`，不覆盖、删除、移动或合并旧层；画布尺寸不变。当前仅完成纯 Python 映射与 Qt/Krita 替身回归，**没有运行真实 Qt 解码或 Krita 通道/像素落点验收**。历史 README 不是本项的实机证据。
+`/layer/add` 支持 `parent_id`、`above`、`offset_x/y` 与三种导入模式。仅新建透明 `paintLayer`，不覆盖、删除、移动或合并旧层；画布尺寸不变。当前仅完成纯 Python 映射与 Qt/Krita 替身回归，**没有运行真实 Qt 解码或 Krita 通道/像素落点验收**。
 
 不提供模型编辑、选区自动回填、#17 强文档安全。#13 token 不接入此写接口，也不是安全写回凭证：接口仍在主线程操作当时的活动文档，调用前人工确认文档；网络超时不能证明未发生写入。
 
-## 请求与兼容性
+## 请求参数
 
-必填：`png_path`、`name`（非空字符串）。可选：`parent_id`、`above`（组 ID/同级 ID）、`offset_x/y`（默认 0）、`mode`、`fit_canvas`。
+必填：`png_path`、`name`（非空字符串）。可选：`parent_id`、`above`（组 ID/同级 ID）、`offset_x/y`（默认 0）、`mode`。拒绝未知字段。
 
 `mode` 是以下三个受支持名称之一。`crop_at_bbox` **未实现**，返回 OpError / HTTP 400，绝不降级到原尺寸、适配或裁切。
 
-- 未指定 `mode`（或为 null）：兼容旧接口，offset 均为 0 则 `keep_size`，否则 `insert_at_offset`。
-- `fit_canvas: true` 是 `mode: "fit_canvas"` 的兼容别名；`false` 表示不缩放（未给 mode 时采用上述旧接口规则）。只接受 JSON bool，null 视为省略。
-- 同时指定 mode 与 bool 时必须一致：fit 模式只能搭配 true，其余模式只能搭配 false；冲突报 400。显式 `keep_size`/`fit_canvas` 不接受非零 offset，不能隐式覆盖用户坐标。
+- 未指定 `mode`（或为 null）：offset 均为 0 则 `keep_size`，否则 `insert_at_offset`。
+- 显式 `keep_size`/`fit_canvas` 不接受非零 offset，不能隐式覆盖用户坐标。
 - 坐标只接受 JSON 整数 0..32768，拒绝 bool、所有 float（包括 `1.0`）、NaN/Infinity、数字字符串、负数、超范围整数；不使用 `int()` 截断。源图/画布每轴为 1..32768 的整数；最终矩形必须完整落在画布内，越界直接拒绝，不依赖 Krita 静默裁切。
-- 父节点只能是组（省略/null 使用 root 容器）；above 必须是该父级的直接 paint/group 子节点。保留原有会话节点 ID 与挂树顺序检查。
+- 父节点只能是组（省略/null 使用 root 容器）；above 必须是该父级的直接 paint/group/vector 子节点。保留原有会话节点 ID 与挂树顺序检查。
 
-## 有界导入与资源预算（修复轮 1）
+## 有界导入与资源预算
 
 每轴 32768 **不是**总资源预算。所有模式额外采用同一组固定准入上限，超出为 OpError / HTTP 400，不创建/挂载新层：
 
@@ -31,7 +30,7 @@
 | 所有权缓冲区工作字节估算 | `2*32MiB + 2*解码字节 + 2*输出字节 + W*40 + 65536`，不得超过 256MiB |
 | 预处理经过时间 | operation 进入后单调时钟 5 秒，阶段/每行协作检查 |
 
-估算覆盖编码输入+去元数据快照、Qt 解码+RGBA 转换、输出 bytearray+bytes、横坐标索引；它**不是整个 Krita 进程 RSS 上限**，不约束 Qt/Krita 内部临时数据、解释器/分配器开销或画布投影。1328² 原尺寸、4096² → 1328² / 2048² 适配仍可用；更大的源可按相同乘积预算判断（例如极细长图），不是放开每轴就都可用。旧正常 CLI/API 参数和三模式映射规则不变，超过本节资源/PNG 范围的旧输入有意收窄，不静默降质。
+估算覆盖编码输入+去元数据快照、Qt 解码+RGBA 转换、输出 bytearray+bytes、横坐标索引；它**不是整个 Krita 进程 RSS 上限**，不约束 Qt/Krita 内部临时数据、解释器/分配器开销或画布投影。1328² 原尺寸、4096² → 1328² / 2048² 适配仍可用；更大的源可按相同乘积预算判断（例如极细长图），不是放开每轴就都可用。所有CLI/API导入受本节资源与PNG范围约束，超限拒绝，不静默降质。
 
 在 Qt 前先读取 33 字节 PNG 签名/IHDR，校验 CRC、合法格式和源尺寸，并计算最终计划/工作预算；之后才读取有界完整文件。只支持**非交错、静态、至多 8bit 标准 PNG**：灰度/索引可 1/2/4/8bit，RGB/灰度+Alpha/RGBA 为 8bit。16bit、Adam7、APNG、非 PNG、未知关键 chunk、坏 CRC、越界/截断 chunk、重复/乱序必要 chunk、IEND 后尾随数据均拒绝，不回退到其他 Qt 格式插件。像素压缩流由 Qt 验证，预检不是完整 PNG 解码器；不合法的有界 IDAT 仍可能到 Qt 后失败。
 
@@ -41,7 +40,7 @@
 
 5 秒预算从本次主线程 operation 进入开始，涵盖预检、解码、转换、缓冲和采样；Qt 返回后、创建节点前、`createNode` 返回后挂树前、挂树回读后写像素前均再检查。耗时预处理返回后若已耗尽预算，不继续开始新层写入。输入资源超限和预处理过期都在建层前拒绝；若 `createNode` 或挂树本身阻塞到过期，则不再开始下一步，游离节点或已挂载空层仍可能存在，**无事务回滚承诺**。
 
-这不是硬实时保证：检查不能抢占磁盘读取、CRC/单次复制、Qt 解码、Krita 调用；bridge 10 秒超时也不取消已运行回调。预算不包含 bridge 队列等待，亦不能阻止已在进行的挂树/写入在 HTTP 超时后完成。本轮未修改桥接或提高超时。若以后要求拒绝所有已过 HTTP 截止时间的写入，最小跨层接口应由 bridge 传递从入队起的绝对截止时间/失效状态，并在操作开始及每次新写前检查；仍不能声称可以取消已进入的 Krita API。
+这不是硬实时保证：检查不能抢占磁盘读取、CRC/单次复制、Qt 解码、Krita 调用；bridge 10 秒超时也不取消已运行回调。预算不包含 bridge 队列等待，亦不能阻止已在进行的挂树/写入在 HTTP 超时后完成。已进入的 Krita API 不能由此取消。
 
 ## 尺寸、原点与变换
 
@@ -78,7 +77,7 @@ sy = floor((2*v+1)*Sh/(2*H))
 - `transparent_margins=[左,上,右,下]` 表示新层写入矩形之外的透明范围，不表示源图内部透明边缘；
 - `resources` 新增源像素、`decoded_rgba_bytes`、输出采样/字节、`estimated_working_bytes`，实际导入时包含转换后的真实行 stride；纯计划使用紧密 RGBA stride。它们是准入估算，不是测量值。
 
-所有参数类型、尺寸、边界、父组/同级关系、QImage 转换及缓冲区校验在创建节点前完成。保留 RGBA/U8 文档守卫、`Format_RGBA8888`、`constBits().asarray(bytesPerLine*height)` 与逐行去 padding，不引入推测的 BGRA 交换。先创建/挂树并回读父组与 above 顺序，再 `setPixelData`，检查返回值，再回读树。失败会报错；写入失败后可能留下新空层/部分层，**不自动删除任何层或重试**，不承诺事务回滚。返回成功也不等于已做 Krita 像素 readback。
+所有参数类型、尺寸、边界、父组/同级关系、QImage 转换及缓冲区校验在创建节点前完成。保留 RGBA/U8 文档守卫、`Format_RGBA8888`、`constBits().asarray(bytesPerLine*height)` 与逐行去 padding，在写入 Krita 的 `setPixelData` 前将 RGBA 转为 BGRA（见 `snapshot.swap_rb`），QImage 侧仍使用 RGBA。先创建/挂树并回读父组与 above 顺序，再 `setPixelData`，检查返回值，再回读树。失败会报错；写入失败后可能留下新空层/部分层，**不自动删除任何层或重试**，不承诺事务回滚。返回成功也不等于已做 Krita 像素 readback。
 
 ## CLI / HTTP 示例
 
@@ -86,14 +85,13 @@ sy = floor((2*v+1)*Sh/(2*H))
 python3 core/cwb.py add original.png 原尺寸 --mode keep_size
 python3 core/cwb.py add large.png 适配 --mode fit_canvas --parent GROUP_ID --above SIBLING_ID
 python3 core/cwb.py add local.png 局部 --mode insert_at_offset --x 120 --y 64
-python3 core/cwb.py add large.png 适配别名 --fit-canvas
 ```
 
 ```json
 {"png_path":"/absolute/local.png","name":"局部备选","mode":"insert_at_offset","offset_x":120,"offset_y":64,"parent_id":"{group-id}","above":"{sibling-id}"}
 ```
 
-CLI `--mode` 与 `--fit-canvas` 互斥。默认旧参数 payload 不变；帮助不联网、不创建缓存。ComfyUI/模型执行路径不属于此项，没有新增自动编辑。
+帮助不联网、不创建缓存。
 
 ## 离线验收与后续实机门槛
 
@@ -103,15 +101,11 @@ CLI `--mode` 与 `--fit-canvas` 互斥。默认旧参数 payload 不变；帮助
 PYTHONDONTWRITEBYTECODE=1 python3 -B -m unittest discover -s tests -v
 ```
 
-修复轮 1 先在旧实现运行快速失败回归：8192² 源、4096² → 4095² 输出，以及解码/整幅复制/输出分配陷阱触发 13 处失败；没有重新分配旧 1GiB 实验。新实现回归通过，新增坏头/CRC/chunk、极端长宽/stride 字节、稀疏超长文件/FIFO、并发修改检测、压缩 ancillary 剥离、1328² 和有界大图计划、预处理各阶段过期不建层及挂树晚返回不开始像素写入的测试。既有 CAD-11 虚构 `input.png` fixture 只作必要替身兼容，不代表真实 PNG 解码。
-
-本机离线子进程设置 384MiB 地址空间和 CPU 6/8 秒软/硬限制，以 memoryview 源调用生产 `resize_rgba`（**不含 Qt/Krita**）：1328² 原尺寸单次打包约 0.0024s / 峰值 RSS 26.7MiB；4096² → 1328² 约 0.292s / 90.2MiB；4096² → 2048² 约 0.703s / 109.8MiB。旧 8192² → 8191² 计划约 6 微秒拒绝、源缓冲未分配。数值是该次采样/进程 RSS 证据，不是性能上界、整个主线程耗时或全链路内存保证。
-
 仍需得到授权后，在专用 Krita 文档中测量而非肉眼猜测：
 
-1. 用上述棋盘/坐标标记/透明边框 PNG，经真实 PyQt6 QImage 解码和 Krita 写入，分别读取源、目标、整画布投影数值，确认红蓝不交换及透明像素语义。若 Krita 实际通道不同，应独立修正并重新验收，不以替身结论替代。
+1. 用上述棋盘/坐标标记/透明边框 PNG，经真实 PyQt6 QImage 解码和 Krita 写入，分别读取源、目标、整画布投影数值，确认 RGBA↔BGRA 边界交换后红蓝显示正确，并核对透明像素语义，不以替身结论替代完整链路实测。
 2. 在小画布导入大图，核对每个采样点、上下留白与奇数舍入；确认 fit 小图没有被放大。
 3. 将完整局部 PNG 以已知非零坐标写入新层，数值核对边角/内部标记及透明边缘，核对原层未变、组/above 顺序正确；保存/重开 `.kra` 再核对。
 4. 测量准入上限内的真实 Qt/Krita 主线程耗时/内存及预算拒绝。纯 Python 资源量测不能替代真实解码、写层、画布投影或 bridge 排队超时测试；现有桥接超时不取消已开始操作。
 
-上述实机项本次全部**未验**，因此不能据离线代码直接宣称 issue 的真实 Krita 像素验收完成。
+上述完整实机项仍**未验**，因此不能据离线代码直接宣称 issue 的真实 Krita 像素验收完成。

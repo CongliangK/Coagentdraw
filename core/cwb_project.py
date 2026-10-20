@@ -9,11 +9,10 @@ import stat
 import tempfile
 import uuid
 
-from cwb_workflow import (WORKFLOW, LEGACY_WORKFLOW, STAGES as WORKFLOW_STAGES,
+from cwb_workflow import (WORKFLOW, STAGES as WORKFLOW_STAGES,
                           DOCUMENT_STAGES, REQUIRED_ROLES)
 
 
-STAGES = ("意图", "调研", "提案", "探索", "锁定", "收敛", "交付", "插画")
 STATE = "project_state.json"
 LOCK = ".project_state.lock"
 
@@ -24,10 +23,6 @@ class ProjectError(ValueError):
 
 def now():
     return datetime.now(timezone.utc).isoformat()
-
-
-def stage_dir(stage):
-    return "stages/{:02d}-{}".format(stage, STAGES[stage - 1])
 
 
 def integer(value, low=0, high=None):
@@ -75,56 +70,6 @@ def fingerprint(root, value):
         if signature(before) != signature(after) or signature(after) != signature(current):
             raise ProjectError("读取时资产发生变化，请重试: " + value)
     return digest.hexdigest(), after.st_size
-
-
-def validate(data):
-    if isinstance(data, dict) and type(data.get("schema_version")) is int and data["schema_version"] == 2:
-        return validate_v2(data)
-    return validate_v1(data)
-
-
-def validate_v1(data):
-    """Frozen schema-1 vocabulary, including its historical directories."""
-    try:
-        if not isinstance(data, dict) or type(data["schema_version"]) is not int or data["schema_version"] != 1:
-            raise ValueError("不支持的 schema_version")
-        uuid.UUID(data["project_id"])
-        if not isinstance(data["name"], str) or not data["name"].strip():
-            raise ValueError("无效项目名")
-        if not integer(data["revision"]) or not integer(data["current_stage"], 1, 8):
-            raise ValueError("无效修订或阶段")
-        for field in ("created_at", "updated_at", "intent_card"):
-            if not isinstance(data[field], str):
-                raise ValueError("无效字段: " + field)
-        for field in ("design_pillars", "style_anchors"):
-            if not isinstance(data[field], list) or not all(isinstance(v, str) for v in data[field]):
-                raise ValueError("无效字段: " + field)
-        if not isinstance(data["stages"], list) or len(data["stages"]) != 8:
-            raise ValueError("需要八个阶段状态")
-        for index, stage in enumerate(data["stages"], 1):
-            if stage["stage"] != index or stage["directory"] != stage_dir(index) or stage["status"] not in ("pending", "in_progress", "completed"):
-                raise ValueError("无效阶段状态")
-        if not isinstance(data["stage_history"], list) or not isinstance(data["assets"], list):
-            raise ValueError("无效历史或资产索引")
-        for entry in data["stage_history"]:
-            if not integer(entry["to"], 1, 8) or (entry["from"] is not None and not integer(entry["from"], 1, 8)) or not isinstance(entry["at"], str) or not isinstance(entry["note"], str):
-                raise ValueError("无效阶段历史")
-        ids = set()
-        for entry in data["assets"]:
-            uuid.UUID(entry["id"])
-            if entry["id"] in ids:
-                raise ValueError("重复资产 ID")
-            ids.add(entry["id"])
-            relative_path(entry["path"])
-            if not integer(entry["stage"], 1, 8) or entry["category"] not in ("temporary", "final"):
-                raise ValueError("无效成果阶段或类别")
-            if not isinstance(entry["sha256"], str) or len(entry["sha256"]) != 64 or any(c not in "0123456789abcdef" for c in entry["sha256"]):
-                raise ValueError("无效资产哈希")
-            if not integer(entry["size"]) or not isinstance(entry["recorded_at"], str) or not isinstance(entry["note"], str):
-                raise ValueError("无效资产记录")
-    except (KeyError, TypeError, ValueError, AttributeError) as exc:
-        raise ProjectError("项目状态结构损坏: " + str(exc)) from exc
-    return data
 
 
 def state_bytes(root):
@@ -223,8 +168,6 @@ def update(root, operation, expected=None):
     root = Path(root).resolve(strict=True)
     with locked(root):
         data, raw = read_state(root)
-        if data["schema_version"] == 1:
-            raise ProjectError("旧流程 schema 1 只读；请先 migration-plan 并显式授权 upgrade")
         if expected is not None and data["revision"] != expected:
             raise ProjectError("修订冲突：预期 {}，当前 {}；未写入".format(expected, data["revision"]))
         before = json.dumps(data, sort_keys=True)
@@ -238,7 +181,6 @@ def update(root, operation, expected=None):
 
 
 def set_stage(data, stage, note, status="in_progress", approval=None):
-    require_v2(data)
     if not integer(stage, 1, 8) or status not in ("pending", "in_progress", "awaiting_review", "completed"):
         raise ProjectError("无效阶段或状态")
     target = data["stages"][stage - 1]
@@ -262,7 +204,6 @@ def set_stage(data, stage, note, status="in_progress", approval=None):
 def record(root, data, path, stage, category, note, *, object_id=None, version=None,
            role="unspecified", document_id=None, kind="working", group_marker=None,
            region=None, preview=None):
-    require_v2(data)
     digest, size = fingerprint(root, path)
     stage = stage or data["current_stage"]
     if not integer(stage, 1, 8) or category not in ("temporary", "final"):
@@ -275,7 +216,7 @@ def record(root, data, path, stage, category, note, *, object_id=None, version=N
     if preview is not None:
         preview_digest, preview_size = fingerprint(root, preview)
         preview_record = {"path": preview, "sha256": preview_digest, "size": preview_size}
-    # Idempotent legacy-style registration still appends changed bytes, never updates hashes.
+    # Changed bytes append a new registration; captured hashes are immutable.
     fields = dict(path=path, sha256=digest, size=size, stage=stage, category=category,
                   note=note, role=role, document_id=document_id, kind=kind,
                   group_marker=group_marker, region=region, preview=preview_record)
@@ -329,31 +270,25 @@ def inspect(root):
             check.update(status="invalid", error=str(exc))
         checks.append(check)
     references = []
-    if data["schema_version"] == 2:
-        refresh_reviews(root, data)  # effective read-only view; no lock/file writes
-        for doc in data["documents"]:
+    refresh_reviews(root, data)  # effective read-only view; no lock/file writes
+    for doc in data["documents"]:
+        try:
+            fingerprint(root, doc["path"])
+            status = "working_file_present_not_approval"
+        except (OSError, ProjectError):
+            status = "unbound_needs_confirmation"
+        references.append({"document_id": doc["id"], "status": status})
+    for idea in data["ideas"]:
+        if idea["text_ref"]:
             try:
-                fingerprint(root, doc["path"])
-                status = "working_file_present_not_approval"
+                digest, _ = fingerprint(root, idea["text_ref"].split("#", 1)[0])
+                status = "ok" if digest == idea["text_ref_sha256"] else "changed_needs_confirmation"
             except (OSError, ProjectError):
                 status = "unbound_needs_confirmation"
-            references.append({"document_id": doc["id"], "status": status})
-        for idea in data["ideas"]:
-            if idea["text_ref"]:
-                try:
-                    digest, _ = fingerprint(root, idea["text_ref"].split("#", 1)[0])
-                    status = "ok" if digest == idea["text_ref_sha256"] else "changed_needs_confirmation"
-                except (OSError, ProjectError):
-                    status = "unbound_needs_confirmation"
-                references.append({"idea_id": idea["id"], "status": status})
+            references.append({"idea_id": idea["id"], "status": status})
     return {"state": data, "asset_checks": checks, "reference_checks": references,
-            "workflow": WORKFLOW if data["schema_version"] == 2 else LEGACY_WORKFLOW,
+            "workflow": WORKFLOW,
             "read_only": True}
-
-
-def require_v2(data):
-    if data["schema_version"] != 2:
-        raise ProjectError("旧流程 schema 1 只读；请显式升级")
 
 
 def identifier(value):
@@ -382,9 +317,11 @@ def new_state(name):
                                "workflow_id": WORKFLOW}]}
 
 
-def validate_v2(data):
+def validate(data):
     """Validate relationships without treating disk existence as a schema invariant."""
     try:
+        if not isinstance(data, dict) or type(data.get("schema_version")) is not int or data["schema_version"] != 2:
+            raise ValueError("不支持的项目状态版本；需要 schema_version=2")
         if data["workflow_id"] != WORKFLOW:
             raise ValueError("未知 workflow_id")
         uuid.UUID(data["project_id"])
@@ -473,10 +410,7 @@ def validate_v2(data):
                 raise ValueError("无效摘要")
             if not integer(asset["size"]) or not isinstance(asset["note"], str) or not isinstance(asset["recorded_at"], str):
                 raise ValueError("无效资产记录")
-            if asset["workflow_id"] == LEGACY_WORKFLOW:
-                if asset["kind"] != "legacy" or asset["legacy_origin"]["stage"] != asset["stage"]:
-                    raise ValueError("丢失旧资产来源")
-            elif asset["workflow_id"] != WORKFLOW or asset["stage_id"] != WORKFLOW_STAGES[asset["stage"] - 1][0]:
+            if asset["workflow_id"] != WORKFLOW or asset["stage_id"] != WORKFLOW_STAGES[asset["stage"] - 1][0]:
                 raise ValueError("资产阶段语义不匹配")
             if not isinstance(asset["role"], str) or not asset["role"].strip():
                 raise ValueError("资产需明确角色")
@@ -484,7 +418,7 @@ def validate_v2(data):
                 doc = lookup(data["documents"], asset["document_id"])
                 if asset["stage"] not in DOCUMENT_STAGES[doc["role"]]:
                     raise ValueError("资产/文档阶段不匹配")
-            if asset["kind"] not in ("working", "checkpoint", "legacy"):
+            if asset["kind"] not in ("working", "checkpoint"):
                 raise ValueError("未知资产身份")
             if asset["kind"] == "checkpoint":
                 prefix = "checkpoints/" + asset["object_id"] + "/" + asset["version"] + "/"
@@ -547,7 +481,7 @@ def validate_v2(data):
                 if decision["validity"] != "valid" and not stage["needs_review"]:
                     raise ValueError("失效批准未标复核")
         for history in data["stage_history"]:
-            if history["workflow_id"] not in (WORKFLOW, LEGACY_WORKFLOW) or not integer(history["to"], 1, 8) or (history["from"] is not None and not integer(history["from"], 1, 8)) or not isinstance(history["at"], str) or not isinstance(history["note"], str):
+            if history["workflow_id"] != WORKFLOW or not integer(history["to"], 1, 8) or (history["from"] is not None and not integer(history["from"], 1, 8)) or not isinstance(history["at"], str) or not isinstance(history["note"], str):
                 raise ValueError("阶段历史缺少流程来源")
     except (KeyError, TypeError, ValueError, AttributeError, RecursionError) as exc:
         raise ProjectError("项目状态结构损坏: " + str(exc)) from exc
@@ -602,6 +536,8 @@ def check_outcomes(data, number, outcomes):
         raise ProjectError("文本起点阶段需起点成果")
     if number == 3 and not ideas:
         raise ProjectError("创意选择需创意成果引用")
+    if number == 2 and not {"research_materials", "research_board"}.intersection(a["role"] for a in assets):
+        raise ProjectError("缺少阶段必要成果角色: research_materials 或 research_board")
     if not REQUIRED_ROLES.get(number, set()).issubset({a["role"] for a in assets}):
         raise ProjectError("缺少阶段必要成果角色: " + str(sorted(REQUIRED_ROLES.get(number, set()))))
     for asset in assets:
@@ -694,66 +630,6 @@ def refresh_reviews(root, data):
                     data["stages"][n].update(needs_review=True, status="awaiting_review")
 
 
-def migration_plan(root):
-    root = Path(root).resolve(strict=True)
-    data, raw = read_state(root)
-    if data["schema_version"] != 1:
-        raise ProjectError("migration-plan 仅用于 schema 1；当前无需升级")
-    mapping = ((1,), (2,), (3, 4), (4,), (5,), (5,), (6, 8), (7, 8))
-    return {"source_sha256": hashlib.sha256(raw).hexdigest(), "source_revision": data["revision"],
-            "source_workflow_id": LEGACY_WORKFLOW, "target_workflow_id": WORKFLOW,
-            "stages": [{"stage": s["stage"], "old_name": STAGES[s["stage"] - 1],
-                        "old_status": s["status"], "candidate_stages": list(mapping[s["stage"] - 1]),
-                        "requires_human_review": True, "inherits_completed": False} for s in data["stages"]],
-            "assets": [{"id": a["id"], "path": a["path"], "legacy_stage": a["stage"],
-                        "candidate_stages": list(mapping[a["stage"] - 1])} for a in data["assets"]],
-            "sidecars": "原 sidecar 保留旧预设，不重写、不移动文件", "read_only": True}
-
-
-def upgrade(root, source_sha256, authorization, expected):
-    if not authorization or not authorization.strip():
-        raise ProjectError("升级必须显式提供授权来源")
-    root = Path(root).resolve(strict=True)
-    with locked(root):
-        old, raw = read_state(root)
-        if old["schema_version"] != 1:
-            raise ProjectError("项目已是 schema 2；未重复升级，原备份保留")
-        if old["revision"] != expected or hashlib.sha256(raw).hexdigest() != source_sha256:
-            raise ProjectError("迁移计划/修订冲突；请重新生成 migration-plan，未写入")
-        data = new_state(old["name"])
-        data.update(project_id=old["project_id"], created_at=old["created_at"], revision=old["revision"] + 1,
-                    intent_card=old["intent_card"], design_pillars=old["design_pillars"], style_anchors=old["style_anchors"])
-        # Legacy history remains explicitly legacy, never relabelled by equal numbers.
-        data["stage_history"] = [{**e, "workflow_id": LEGACY_WORKFLOW} for e in old["stage_history"]] + data["stage_history"]
-        if old["intent_card"].strip():
-            add_idea(root, data, "legacy-intent", "旧流程意图（待重新选择）", old["intent_card"])
-        for asset in old["assets"]:
-            data["assets"].append({**asset, "object_id": asset["id"], "version": asset["id"],
-                                   "workflow_id": LEGACY_WORKFLOW, "stage_id": None, "role": "legacy_unclassified",
-                                   "document_id": None, "kind": "legacy", "group_marker": None, "region": None,
-                                   "preview": None, "legacy_origin": {"stage": asset["stage"], "name": STAGES[asset["stage"] - 1], "state_sha256": source_sha256}})
-        backup = "project_state.schema1-" + datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ") + "-" + str(uuid.uuid4()) + ".json.bak"
-        data["migration"] = {"source_sha256": source_sha256, "backup": backup, "authorization": authorization,
-                             "at": now(), "legacy_stages": old["stages"], "completed_inherited": False}
-        validate(data)  # all validation before backup publication
-        # Exclusive create; failed or repeated upgrades never overwrite earlier evidence.
-        flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
-        try:
-            with os.fdopen(os.open(root / backup, flags, 0o600), "wb") as stream:
-                stream.write(raw)
-                stream.flush()
-                os.fsync(stream.fileno())
-            directory = os.open(root, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
-            try:
-                os.fsync(directory)
-            finally:
-                os.close(directory)
-            atomic_write(root, data, raw)
-        except (Exception, KeyboardInterrupt) as exc:
-            raise ProjectError("升级未确认；备份步骤可能已发生，保留原状态/备份，先查看实际状态勿盲重试；backup=" + backup + ": " + str(exc)) from exc
-        return data
-
-
 def run(args):
     command = args.project_cmd
     if command == "init":
@@ -766,10 +642,6 @@ def run(args):
         result = initialize(root, args.name)
     elif command == "status":
         result = inspect(args.root)
-    elif command == "migration-plan":
-        result = migration_plan(args.root)
-    elif command == "upgrade":
-        result = upgrade(args.root, args.source_sha256, args.authorize, args.expect_revision)
     else:
         def operation(root, data):
             if command == "edit":

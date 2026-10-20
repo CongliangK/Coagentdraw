@@ -112,7 +112,7 @@ def validate_contract(graph, contract, mode=None, single_image=False):
 
 
 def image_reference(contract, key):
-    """显式预处理输出；旧契约仍直接引用 LoadImage。"""
+    """引用显式预处理输出；未配置预处理时直接引用 LoadImage。"""
     target = contract.get('image_preprocessing', {}).get(key, contract['images'][key])
     return [target['node'], 0]
 

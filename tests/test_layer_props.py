@@ -225,11 +225,11 @@ class Operations(unittest.TestCase):
                              {'status': 'error', 'error': 'RuntimeError: API lookup failed'})
             self.assertEqual(paint['blending_mode'], 'normal')
 
-    def test_layers_never_swallows_legacy_field_errors(self):
+    def test_layers_never_swallows_required_field_errors(self):
         for method in ['bounds', 'uniqueId', 'name', 'type', 'visible', 'opacity', 'childNodes']:
             with self.subTest(method=method), patch.object(self.node, method,
-                                                          side_effect=RuntimeError('legacy failure')):
-                with self.assertRaisesRegex(RuntimeError, 'legacy failure'):
+                                                          side_effect=RuntimeError('required getter failure')):
+                with self.assertRaisesRegex(RuntimeError, 'required getter failure'):
                     ops.layers()
 
     def test_optional_getter_faults_still_strictly_reject_props_preflight(self):
@@ -287,10 +287,10 @@ class Routing(unittest.TestCase):
                 self.assertEqual(healthy['opacity'], .502)
                 self.assertIsNone(failed['blending_mode'])
                 self.assertEqual(failed['property_status']['blending_mode']['status'], 'error')
-            with patch.object(broken, 'opacity', side_effect=RuntimeError('legacy failure')):
+            with patch.object(broken, 'opacity', side_effect=RuntimeError('required getter failure')):
                 status, body = self.get_layers()
                 self.assertEqual(status, 500)
-                self.assertIn('legacy failure', body['error'])
+                self.assertIn('required getter failure', body['error'])
 
     def test_partial_write_failed_readback_then_layers_recovery(self):
         for getter, key, stored, requested in [('alphaLocked', 'alpha_locked', 'alpha', True),

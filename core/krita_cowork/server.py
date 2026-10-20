@@ -27,7 +27,7 @@ POST_ROUTES = {
     "/layer/png": (ops.layer_png, ("id", "path"), ("underlay",)),
     "/layer/group": (ops.layer_group, ("name",), ("parent_id", "above")),
     "/layer/add": (ops.layer_add, ("png_path", "name"),
-                   ("above", "offset_x", "offset_y", "parent_id", "mode", "fit_canvas")),
+                   ("above", "offset_x", "offset_y", "parent_id", "mode")),
     "/layer/vector": (ops.layer_vector,
                       ("svg", "name", "target_document", "canvas", "dpi", "dedicated_document"),
                       ("parent_id", "above")),
@@ -138,7 +138,7 @@ class ControlServer(object):
                 missing = [k for k in required if k not in data]
                 if missing:
                     raise ops.OpError("缺少必填参数: {0}".format(", ".join(missing)))
-                if path in ("/layer/props", "/layer/vector"):
+                if path in ("/layer/add", "/layer/props", "/layer/vector"):
                     unknown = set(data) - set(required + optional)
                     if unknown or (path == "/layer/props" and not any(k in data for k in optional)):
                         raise ops.OpError("需要已知字段/属性,不接受未知字段")

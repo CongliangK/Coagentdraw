@@ -4,17 +4,11 @@
 
 **Krita 是视觉中枢**。角色设计默认试点：当前设计锚点 → 通用搜索找角色 → 优先找对应三视图/设定资料 → 当前画布试拼大型与协调性 → 保留、调整或放弃 → 重构原创线稿 → 上色 → 本角色正侧背设定核对。只有锚点也能起步，不强制先填整卡、独立手绘剪影或建立素材库；形状语言用于试拼分析与调整。
 
-这是待真实作品验证的新默认方向，不代表在线搜索、自动变形或艺术验收已实现。开放联想仍可用于寻找方向；已定角色不重做选题。三视图是角色完整路线必需成果，参考来源的三视图不能替代。独立插画继续按07/08探索确认与制作交付，本次不改插画手册；角色确认不等于插画确认。[角色试点采用与待验边界](<design/Krita中枢改造跟踪.md#2026-10-19-角色拼贴原型流程调整>)单列。
+素材、草图和当前绘制/编辑结果放在同一工作画布，素材旁置便于对照与拼贴，原稿与候选独立分层；最终导出隔离参考。
 
-日常入口：[正式执行规范](<design/Krita中枢创作流程_正式执行规范.md>)、[八阶段手册](<design/执行手册/README.md>)、[改造跟踪](<design/Krita中枢改造跟踪.md>)。四类本地可编辑 Krita 文档按需建立：想象/提案板（02—03承接01）、角色设计稿（04—05）、三视图设定（06）、插画稿（07—08）；PNG 只是派生预览，原稿与候选保留。KRA 与第三方原始资料不入公开仓库。
+这是待真实作品验证的默认方向，工具能力见[能力与验证边界](<design/工具能力与验证.md>)。开放联想仍可用于寻找方向；已定角色不重做选题。参考来源三视图不能代替本角色正侧背设定。独立插画按07/08探索确认与制作交付。
 
-| 能力层次 | 既有 PR-02 状态与未验边界 |
-|---|---|
-| 已有实现（A离线） | 新项目schema 2 + workflow；多起点拆合来源、多文档、版本化资产/人类来源决定与批准失效；只读迁移计划和授权备份升级；新旧文档角色组/sidecar分派。旧schema1按旧语义只读与原有导出兼容；下文其他能力仍受各自说明限制 |
-| 待联调/后续工程 | 新旧绑定的真实Krita保存重开未验；真实想象板/创意入画布、候选比较、安全改图、三视图与插画制作链路按PR-03—06继续，不能以本次索引/空组宣称已画完或批准 |
-| 待艺术验收 | 真实创作的选择、修订、三视图一致性及插画表达须作者确认，本次无作品验收 |
-
-现行创作理念与文档合同现在采用，文档与架构设计思路优先更新；程序实现可相对延后，不是采用新理念的前置条件。旧程序兼容合同不代表旧创作理念继续生效；后续程序实施另行安排。PR-02只交付版本化索引与按文档角色组织组层的工程能力，初始化不生成八份空表或空KRA；本轮不安装插件，不进行实机/作品验收。软件已实现与待实现能力仍以实际证据为准，不表示软件已支持全部新流程。
+日常入口：[正式执行规范](<design/Krita中枢创作流程_正式执行规范.md>)、[八阶段手册](<design/执行手册/README.md>)。四类本地可编辑Krita文档按需建立：想象/提案板、角色设计稿、三视图设定、插画稿；不初始化空KRA。项目索引使用schema 2，工作流固定为 `krita-character-illustration-v1`，阶段组sidecar使用版本2。
 
 ### 插画日常制作（07—08）
 
@@ -25,7 +19,7 @@
 
 作者持续统筹表达、取舍与确认，助手围绕当前稿的具体问题协助；表达可以是事件、状态、情绪、关系或形象气质。轮次可以合并、往返，不新增阶段、逐轮审批或候选配额。沿用既定画幅与三视图源，缩小只用于观察/副本；候选经比较、作者接受并实际采用后才成为下一轮基底。有效可编辑源须有真正影响当前画面的层或蒙版，被不透明 AI 图盖住的旧线稿/平涂不算最终分层能力。
 
-本次只采用用户认可分析调整文档与工作方法，未新增程序能力、运行模型、操作作者设备或验收作品；[采用来源与 A/B/C 边界](<design/Krita中枢改造跟踪.md#2026-10-18-插画流程文档调整>)单列。详细动作、画改短表与回退入口以上述两份手册为准。
+详细动作、画改短表与回退入口以上述两份手册为准。
 
 > [!IMPORTANT]
 > **项目状态：早期实验，个人开发工作台。** 本仓库主要作为作者与 AI 助手协作开发的公开工作区，用 GitHub Issues 组织任务与记录。它目前**不是**面向最终用户的产品：接口与行为随时变动，不做兼容性承诺，不提供使用支持。欢迎围观和开 Issue 记录问题，但请自行评估风险。
@@ -130,7 +124,7 @@ python3 core/cwb.py project status "项目/我的第一个设计"
 | `/layer/visible` `/layer/rename` | POST | 可见性 / 重命名 |
 | `/layer/props` | POST | Alpha Lock / 0..1 不透明度 / 稳定 ID 混合模式（写后回读，非原子事务） |
 
-当前插件没有通用笔刷、变形或滤镜接口；手册中的相关画改由作者在 Krita GUI，或具备相应界面能力且获授权的助手执行。普通 edit 的场景草稿＋角色参考不是几何锁定；localedit 的当前底画＋真实蒙版没有额外独立角色/Pose/Depth 输入，详见 [ComfyUI 说明](<comfyui/README.md>)。
+当前插件没有通用笔刷、变形或滤镜接口；手册中的相关画改由作者在 Krita GUI，或具备相应界面能力且获授权的助手执行。普通 edit 的场景草稿＋角色参考不是几何锁定；独立HQ局部编辑交互模板使用当前底画＋真实蒙版，没有额外独立角色/Pose/Depth输入，详见 [ComfyUI 说明](<comfyui/README.md>)。
 
 图层组与组内 PNG 导入的参数约束、CLI 示例及真实 Krita 验收步骤见 [CAD-11 图层组说明](docs/development/cad11_layer_groups.md)。
 
@@ -154,19 +148,21 @@ python3 core/cwb.py save 作品.kra
 
 离线项目状态与成果索引：`python3 core/cwb.py project --help`，目录、修订冲突和恢复说明见 [项目状态 CLI](design/项目状态_CLI.md)。
 
-版本化阶段组：`python3 core/cwb.py stage --help`，新流程首次用 `--workflow krita-character-illustration-v1 --role ideation|character|turnaround|illustration` 按兼容阶段的工作文档建所需组；省略workflow的新sidecar保持旧预设，旧文件不自动迁移。需显式已保存文档与独立身份sidecar；同名不接管、持久标记/部分失败和旧06诊断导入边界见[CAD-21阶段组织](<docs/development/cad21_stage.md>)（仅mock验证，真实保存重开未验）。
+按文档角色建组：`python3 core/cwb.py stage --help`。首次setup指定 `--role ideation|character|turnaround|illustration`，仅支持现行工作流；同名不接管，需已保存文档与独立sidecar。身份、部分失败与重开限制见[阶段组织](<docs/development/cad21_stage.md>)。
 
-最小离线文件比较：`python3 core/cwb.py compare --help`。接受手工 before/after PNG，原尺度共同裁切、来源 SHA256 和非破坏性决定事件见 [CAD-23 比较说明](<docs/development/cad23_compare.md>)。仅 `create` 使用外部 CLI 可选 Pillow；所有决定仅记录，不实际隐藏/恢复 Krita 投影，不代表 #17 完成或 #25 联调。
+其他工具按实际任务选用，`--help` 均离线、无服务访问或缓存创建：
 
-已有主图、前/侧/背与两个装备拆解的最小离线设定页：`python3 core/cwb.py layout --help`。`fixture` 仅教学占位、非真实角色；`plan/render/prepare` 保留来源 SHA、六张独立 PNG、标注 SVG 与人工执行 payload，不自动写 Krita/生成三视图/保证一致性。`render/prepare` 延迟使用 CLI-only 可选 Pillow，prepare 从已核原源按 CAD-14 重采样并逐 RGBA 核对渲染物（本地一致性，非同 UID 防篡改认证）。受控矢量入口、300 DPI points 映射、部分写入与 B 门槛见 [CAD-28 排版说明](<docs/development/cad28_layout.md>)；Krita 真正改字/齐线/字体与 KRA 保存重开均未验，不关闭 #28。本项仅将同级 `above` 扩展到 vectorlayer，`props` 为 vectorlayer 开放能力守卫下的 opacity/blending_mode，Alpha Lock/root/其他类型守卫不放开。
+| 命令 | 当前能力与边界 | 详细契约 |
+|---|---|---|
+| `compare` | before/after PNG 同尺度比较与人工决定记录；不自动替换 Krita 主稿 | [比较](<docs/development/cad23_compare.md>) |
+| `layout` | 已有主图、正侧背与装备图排版，准备 PNG/SVG 人工导入请求；不生成三视图或核验一致性，矢量编辑与保存重开待实测 | [排版](<docs/development/cad28_layout.md>) |
+| `review` | 登记已有原图/剪影/灰阶，校验并导出用户提供的反馈；无已验证的模型审评后端 | [审评](<docs/development/cad24_review.md>) |
+| `candidates` | 待执行候选计划、现成透明黑 PNG 拼板、入选清单；不生成或分割图像，不导入 Krita | [候选](<docs/development/cad22_candidates.md>) |
+| `style` | 独立 sidecar 的风格 token、参考摘要、锁定记录及提示片段；不自动修改生成请求，不保证跨图一致性 | [风格](<docs/development/cad26_style.md>) |
+| `export-project` | 显式选定资产的安全导出与来源记录；不判断作品完成或 KRA 可编辑性 | [导出](<docs/development/cad30_export.md>) |
+| `python3 core/cwb_research.py` | 本地 JSON 来源计划、关键词检索与采用记录；不自动联网、解析 PDF 或核验来源 | [事实检索](<docs/development/factual_research.md>) |
 
-离线视觉审评接口准备：`python3 core/cwb.py review --help`。`prepare` 仅记录用户已有原图/剪影/灰阶 PNG 和手工意图/支柱（`prepared_not_executed`），`import` 仅校验用户手工提供的反馈及人工确认/修改/驳回，导出 Markdown+JSON（`response_user_supplied`）。见 [CAD-24 契约与未完成验收](<docs/development/cad24_review.md>)。**无已验证的审评后端、模型调用或艺术效果证据；合成 fixture 不是真实角色验收，#24 不关闭。**
-
-有限离线候选计划/现成剪影拼板：`python3 core/cwb.py candidates --help`。仅 `plan` 记录 `prepared_not_executed`；`board` 消费显式 SHA 登记的透明黑 PNG，contain 不拉伸，失败占位不消失（退出 2），仅输出入选清单/未执行新层 payload。可选 Pillow 仅在实际拼板时导入。字段、路径与资源上限见 [CAD-22 离线候选说明](<docs/development/cad22_candidates.md>)。教学 fixture 不证明真实八候选生成、两方向有效、mask 可靠或真实组内导入；这些验收仍未满足。
-
-有限离线风格配置：`python3 core/cwb.py style --help`。版本化 `style_tokens` **仅存独立 sidecar，不在项目主状态**；支持参考图摘要/锁定历史、显式提示片段导出和复用 #23 的同尺度人工标杆比较。契约与未完成门槛见 [CAD-26 风格工具](<docs/development/cad26_style.md>)；不自动改生成请求，不保证跨图一致性，未运行两个角色生成。
-
-阶段二事实核对支线：`python3 core/cwb_research.py --help`。独立标准库脚本提供有限来源计划、已有页级/对象 JSON 条目的本地关键词检索、精确定位及人工采用证据汇总，见[事实检索契约](docs/development/factual_research.md)。不自动联网、解析 PDF 或核验来源真伪；只辅助[现行联想调研工作表](<design/执行手册/02_联想与前期调研.md>)中的具体事实问题，不限制整个灵感池或代替 Krita 想象板。
+候选拼板的教学素材与离线测试不构成真实创作验证，剪影也不是角色流程的起步门槛。事实检索只辅助[阶段02](<design/执行手册/02_联想与前期调研.md>)中的具体事实问题，不限制灵感池或代替 Krita 想象板。
 
 环境变量：
 

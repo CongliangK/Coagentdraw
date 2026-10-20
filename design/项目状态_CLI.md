@@ -1,11 +1,10 @@
-# 项目状态与成果索引（PR-02）
+# 项目状态与成果索引
 
 离线索引，不访问 Krita/ComfyUI/网络，不绘图、不保存 KRA、不复制作品、不批准艺术质量。入口为 `python3 core/cwb.py project --help`；`--version` 显示合同版本。创作合同见[现行总纲](<Krita中枢创作流程_正式执行规范.md>)。A 测试不代替 B 实机或 C 作者验收。
 
 ## 版本与初始化
 
 - 新建使用 `schema_version: 2`、`workflow_id: krita-character-illustration-v1`；结构版本和创作流程分别辨认。八条阶段记录含稳定 `stage_id`，不依赖中文目录。
-- schema 1 **只读旧语义**：`status`、同名幂等 `init` 和原有 `export-project` 读取仍可用；`edit/stage/record` 等写命令拒绝。旧06仍是收敛，不是三视图。旧 sidecar 按[旧预设](<../docs/development/cad21_stage.md>)解释，不随项目升级重写。
 - `init` 只建立状态及永久锁，不生成八表、阶段目录、空 KRA、虚构作品或批准。重复同名不重置，不同名报错，损坏/未知版本不覆盖。
 
 ```bash
@@ -15,7 +14,7 @@ python3 core/cwb.py project status /明确/项目目录
 
 省略 `--root` 时为**仓库**下 `项目/<项目名>/`，项目名须单个目录名，不随调用者工作目录改变；显式 `--root` 的相对路径仍相对调用者工作目录。真实创作的任务记录、资料、KRA、候选、导出和状态索引均放入对应项目目录，整棵目录由仓库 [.gitignore](<../.gitignore>) 排除。结构建议与隐私边界见 [本地项目约定](<../README.md#本地设计项目>)。已有 `_本地暂存/` 项目不自动迁移，继续用明确路径访问；不要同名初始化来代替打开旧项目。所有示例均需改为已授权项目，开发只在临时 fixture 中验证。
 
-`current_stage` 仅关注位置，不推断前后阶段完成。`stages` 按新01—08：`text_seeds`、`research_imagination`、`concept_selection`、`character_exploration`、`character_resolution`、`turnaround`、`illustration_planning`、`illustration_production`。`stage_history` 每条携带 workflow，迁移保留旧历史旧含义。
+`current_stage` 仅关注位置，不推断前后阶段完成。`stages` 按01—08：`text_seeds`、`research_imagination`、`concept_selection`、`character_exploration`、`character_resolution`、`turnaround`、`illustration_planning`、`illustration_production`。`stage_history` 每条携带 workflow。
 
 ## 多起点、来源拆合与选择
 
@@ -39,11 +38,11 @@ python3 core/cwb.py project document /项目 design-001 documents/character/desi
   --role character --concept merged
 ```
 
-文件必须是项目内已存在 `.kra`。角色为 `ideation`（01—03）、`character`（04—05）、`turnaround`（06）、`illustration`（07—08）；非 ideation 需 `--concept`，插画还需 `--illustration ID`。同角色可登记多个文档/版本。ID绑定后不静默改指向，新路径另给 ID；工作 KRA 可以正常保存，登记不会把每次保存当作批准快照变化。CLI 仅验证本地文件存在，不证明是有效 KRA、已完成保存或与内存画面相同。
+文件必须是项目内已存在 `.kra`。角色为 `ideation`（01—03）、`character`（02素材、04—05）、`turnaround`（06）、`illustration`（07—08）；非 ideation 需 `--concept`，插画还需 `--illustration ID`。同角色可登记多个文档/版本。ID绑定后不静默改指向，新路径另给 ID；工作 KRA 可以正常保存，登记不会把每次保存当作批准快照变化。CLI 仅验证本地文件存在，不证明是有效 KRA、已完成保存或与内存画面相同。
 
 ## 版本化资产与不变批准快照
 
-`record` 只读取已有文件，追加记录，绝不改写旧 ID/哈希。原有 `--category temporary/final` 保留，但 final 不等于批准。可选 `edit --intent/--pillar/--anchor` 保留为深写/兼容元数据，**不限制为单意图**；清空选项沿用旧契约。
+`record` 只读取已有文件，追加记录，绝不改写旧 ID/哈希。`--category temporary/final` 是用途分类，final 不等于批准。`edit --intent/--pillar/--anchor` 可填写项目摘要元数据，多个起点在 `ideas` 中管理。
 
 ```bash
 python3 core/cwb.py project record /项目 previews/exploration.png --category temporary --stage 4 \
@@ -74,7 +73,7 @@ python3 core/cwb.py project decision /项目 asset <资产UUID> approve \
 | 阶段 | 最低已登记成果 |
 |---|---|
 | 01 | `idea:ID` 纯文本起点即可 |
-| 02 | `research_board` |
+| 02 | `research_materials`（当前工作画布中的素材）或 `research_board`（独立想象板） |
 | 03 | 人类 select 选中的 `idea:ID` |
 | 04 | `character_exploration` |
 | 05 | `character_master_lineart` + `character_master_basecolor` |
@@ -82,7 +81,7 @@ python3 core/cwb.py project decision /项目 asset <资产UUID> approve \
 | 07 | `illustration_plan` |
 | 08 | `final_illustration` + `editable_source` + `delivery_manifest` |
 
-除起点外，必要资产须本 workflow、本阶段、独立 checkpoint；视觉成果还需文档与组标记/区域。记录不足则拒绝，不以旧阶段成果自动充数。此表是索引门槛，不是 PR-03—06 的绘图/核对实现，也不验证线稿质量、KRA层可编辑性、左右或成画表达。
+除起点外，必要资产须本 workflow、本阶段、独立 checkpoint；视觉成果还需文档与组标记/区域。记录不足则拒绝，此表是索引门槛，不是绘图/核对实现，也不验证线稿质量、KRA层可编辑性、左右或成画表达。
 
 ```bash
 python3 core/cwb.py project decision /项目 stage text_seeds approve --outcome idea:seed-a \
@@ -91,47 +90,34 @@ python3 core/cwb.py project stage /项目 1 --status completed --approval <上�
 python3 core/cwb.py project stage /项目 2 --status awaiting_review --expect-revision <当前修订>
 ```
 
-## 拼贴流程的登记兼容
+## 同画布素材的登记
 
-创作手册允许02取得资料后直接在角色设计稿中试拼，不强制另建想象板；当前程序仍沿用 `ideation=01—03`、`character=04—05` 的文档角色限制，02完成还要求 `research_board`。因此不能将绑定到 `character` 文档的成果登记为阶段02，也不能用 `stage setup 2 --role character` 建组；文档更新没有改变这些校验。
+02收集的素材可以直接旁置在角色稿中，与草图和编辑结果同画布对照、拼贴。同一个 `character` 文档可承接02、04、05，不必为登记另建想象板或重复登记KRA。
 
-| 实际情况 | 当前可行处理 |
-|---|---|
-| 直接在角色稿收集和试拼，无独立想象板 | 在项目内现有任务记录或02短表中保留来源、材料与角色稿组/层、版本；真实原型可按04、`character_exploration` 和 `character` 文档登记。02若已开展，索引保留 `in_progress`，注明登记兼容缺口；不为凑完成建空板，不将04成果冒记02。 |
-| 已有真实想象板，且确需登记02完成 | 沿用真实 `ideation` 文档及对应区域/组，按既有 `research_board`、checkpoint与人类批准合同登记；不要求为新流程额外复制角色稿。 |
-| 本轮只用画布和短记录，不使用项目状态CLI | 正常按手册交接，说明未做机器登记；不手写状态JSON，不声称索引阶段已完成。 |
-
-机器关注位置可到04，02未标完成不阻断实际试拼；跳转不会自动批准或补齐前序成果。已有明确主线可复用真实起点与选择记录；没有记录时只有实际指令才能作为选择来源，不能由助手伪造批准。不要把同一KRA重复登记成另一个文档角色来绕过限制，也不修改旧sidecar语义或移走项目文件。
-
-后续工程需明确跨阶段引用角色稿材料、02必要成果与完成条件、stage sidecar的兼容方式，并回归旧数据及批准失效规则；在实现前，本节是现行临时操作说明，不能称跨角色登记已经支持。责任落点见[角色流程整合跟踪](<Krita中枢改造跟踪.md#2026-10-20-角色流程文档整合>)。
-
-## 显式升级与回退
+- 角色稿中的素材按阶段02、`research_materials`登记，绑定素材所在的真实区域或持久组标记；试拼结果另按04、`character_exploration`登记。
+- 确实使用独立想象板时，仍可在 `ideation` 文档登记 `research_board`；两种载体都是有效选择。
+- 02完成仍需要独立checkpoint、可定位视觉成果及真实人类批准。来源链接、空组或“已找到”不等于素材已进画布；04拼贴结果也不能冒记02来源材料。
+- 机器关注位置、执行情况与艺术判断分别记录；只用画布和短表时可以不做机器登记，不手写JSON或伪造批准。
 
 ```bash
-python3 core/cwb.py project migration-plan /旧项目
-# 先审阅旧阶段、资产和多义候选映射；不会写锁/状态/KRA/目录。
-python3 core/cwb.py project upgrade /旧项目 --expect-revision <计划source_revision> \
-  --source-sha256 <计划source_sha256> --authorize "明确升级授权的实际来源/人工转录"
+python3 core/cwb.py stage setup 2 --role character \
+  --document /项目/documents/design.kra --state /项目/documents/design.cwb-stage.json
+python3 core/cwb.py project record /项目 previews/materials.png --stage 2 --category temporary \
+  --role research_materials --document-id design-001 --region 0 0 800 1200
 ```
 
-升级需要计划摘要、修订与非空授权同时匹配。锁内先验证，独占新建带 UTC 时间戳和随机后缀的 schema1 `.json.bak`，flush/fsync 并持久化目录，再原子替换主状态；**不覆盖任何已有备份**。记录来源摘要、备份名、授权、原阶段与历史。旧意图最多成为一个未选起点；旧资产 ID、路径、哈希、类别与旧阶段语义来源保留；不移动目录/文件、不写 KRA/sidecar。
-
-旧05/06候选映射新05；旧07候选新06/08；旧08候选新07/08。所有映射待人工核对，**没有新阶段继承 completed**。多义映射不由机器代决策。新关注位置从01开始。
-
-失败报告 `backup=...` 及未确认步骤；旧主状态（若尚未替换）和已发生备份均保留，不自动回滚/删除。目录 fsync 失败也可能已提交，先 `status` 查看实际 schema，勿盲重试；已是schema2则拒绝重复升级。确认主状态仍为旧版后可基于新计划重试，产生新备份且不覆盖前次。强杀可能保留临时文件/不完整备份，应保留检查，不自动采纳。
-
-回退需停止写入者，人工保留当前schema2状态，核对 `migration.backup` 的摘要等于来源后，在明确授权下恢复原状态。程序不自动执行回退，不使用破坏性 Git 重置。原KRA、旧目录、旧sidecar从未移动；恢复后仍旧流程只读。schema2新增索引不会被反向转换，回退前须保留。
+示例区域必须替换为当前素材实际所在的区域；本命令只登记已有文件，不导入、绘制或保存KRA。
 
 ## 路径、锁、修订、原子写与导出
 
 - 资产/文档/全文/预览路径均相对项目，POSIX `/` 分隔；拒绝绝对路径、空组件、`.`/`..`、反斜杠、驱动器、符号链接、非普通文件、状态/锁作为作品。来源说明仅文本，不读取网址或项目外文件。
-- 每次写先 POSIX 非阻塞独占锁；永久锁不可删除/替换。`--expect-revision N` 拒绝过期写入；省略则修改锁内最新状态，非比较并交换语义。upgrade必填修订。
+- 每次写先 POSIX 非阻塞独占锁；永久锁不可删除/替换。`--expect-revision N` 拒绝过期写入；省略则修改锁内最新状态，非比较并交换语义。
 - 单文件同目录临时写、flush/fsync、原始状态字节复核后原子替换，首次采用“不存在才创建”。检测用户手改/忙锁/过期修订返回冲突，不压回旧状态。修订只在实际变更时递增。
 - 协作锁不隔离恶意进程；最终校验与替换间仍有非协作竞争窗口。项目根及祖先目录须可信、操作期间稳定，不承诺网络盘/同步盘、断电或跨Krita/JSON事务。哈希只描述磁盘读到的字节。
 - `status` 不创建锁或写任何项目数据，返回 `state`（包含计算出的复核有效视图）、`asset_checks`（ok/changed/missing/invalid）、`reference_checks` 和workflow。成功退出仅表示完成检查，须查看异常项；损坏状态/写冲突/命令错误退出1。
-- `export-project` 保留旧schema原有显式final选择/安全复制契约；新schema额外保留workflow、对象版本与成果身份，多起点不再强制单意图。导出只验证文件，不等于批准、正式三视图/插画交付；详见[导出说明](<../docs/development/cad30_export.md>)。
+- `export-project` 显式选择final资产并安全复制，携带workflow、对象版本与成果身份。导出只验证文件，不等于批准或完整交付；详见[导出说明](<../docs/development/cad30_export.md>)。
 - 项目、KRA、确认快照和第三方原始材料留本地，不纳入公开仓库。
 
 ## 验证边界
 
-[既有状态回归](<../tests/test_project.py>)保留并强化并发、路径、修订、失败守卫；[工作流回归](<../tests/test_workflow_project.py>)覆盖 T01—04/T14/T18—21。旧 fixture 专门验证 schema1只读及旧导出；旧预设测试仍完整保留。全部仅临时合成文件/mock，**无 B Krita 保存重开或 C 真实作品/人类艺术批准证据**。
+[状态回归](<../tests/test_project.py>)和[工作流回归](<../tests/test_workflow_project.py>)验证并发、路径、修订、文件失败守卫、多起点、成果引用与批准失效。测试使用临时合成文件和mock，不代表真实KRA保存重开、画布绑定或作者艺术验收。

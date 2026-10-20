@@ -181,16 +181,15 @@ class Operations(unittest.TestCase):
         self.assertEqual(paint['parent_id'], inner['id'])
         self.assertEqual(self.doc.refreshes, 4)
 
-    def test_legacy_add_positional_arguments_and_default_root(self):
+    def test_add_positional_arguments_and_default_root(self):
         result = ops.layer_add('input.png', 'paint', None, 2, 3)
         self.assertEqual(result['parent_id'], self.doc.root.uid)
         self.assertEqual(self.doc.root.children[0].pixels[1:], (2, 3, 1, 2))
 
-    def test_uuid_normalization(self):
+    def test_parent_uses_returned_layer_id(self):
         group = self.group()
-        for value in (group['id'].strip('{}'), 'PyQt6.QtCore.QUuid("%s")' % group['id']):
-            self.group(parent_id=value)
-        self.assertEqual(len(self.doc.root.children[0].children), 2)
+        self.group(parent_id=group['id'])
+        self.assertEqual(len(self.doc.root.children[0].children), 1)
 
     def test_invalid_parent_and_above_for_both_operations(self):
         group = self.group()

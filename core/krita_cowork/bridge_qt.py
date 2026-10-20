@@ -5,10 +5,7 @@ Krita 的脚本 API 只允许在主线程调用;HTTP 工作线程通过 call() �
 """
 import threading
 
-try:  # Krita 6 AppImage 内为 PyQt6;兼容老版 Krita 的 PyQt5
-    from PyQt6.QtCore import QObject, pyqtSignal
-except ImportError:  # pragma: no cover
-    from PyQt5.QtCore import QObject, pyqtSignal
+from PyQt6.QtCore import QObject, pyqtSignal
 
 
 class _Runner(QObject):

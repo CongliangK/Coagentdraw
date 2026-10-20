@@ -23,10 +23,7 @@ class PropsWriteError(Exception):
         self.payload = payload
         super().__init__(payload["error"])
 
-try:
-    from PyQt6.QtGui import QImage
-except ImportError:  # pragma: no cover
-    from PyQt5.QtGui import QImage
+from PyQt6.QtGui import QImage
 
 from krita import Krita
 
@@ -70,19 +67,12 @@ def _find_node(doc, layer_id, allow_root=False):
     stack = [root]
     while stack:
         n = stack.pop()
-        if _normalize(_node_id(n)) == _normalize(want):
+        if _node_id(n) == want:
             if n is root and not allow_root:
                 raise OpError("root 图层不可作为操作目标")
             return n
         stack.extend(n.childNodes())
     raise NotFoundError("图层 id 失效(文档可能已重开): {0}".format(layer_id))
-
-
-def _normalize(id_str):
-    """兼容早期协议键 'PyQt6.QtCore.QUuid("{uuid}")' 与 '{uuid}'。"""
-    if "QUuid(" in id_str:
-        id_str = id_str.split("QUuid(", 1)[1].rstrip(")")
-    return id_str.strip("'{\"}")
 
 
 # ── 只读操作 ──────────────────────────────────────────────────────
@@ -132,7 +122,7 @@ def layers():
 
     def ser(n, depth):
         b = n.bounds()  # root 层无 x()/y(),统一走 bounds
-        # 旧字段/树结构保持严格读取,不把其异常伪装成完整列表。
+        # 必需字段/树结构保持严格读取,不把其异常伪装成完整列表。
         result = {
             "id": _node_id(n),
             "name": n.name(),
@@ -309,7 +299,7 @@ def layer_group(name, parent_id=None, above_layer_id=None):
 
 
 def layer_add(png_path, name, above_layer_id=None, offset_x=0, offset_y=0,
-              parent_id=None, mode=None, fit_canvas=None):
+              parent_id=None, mode=None):
     """PNG → 新透明 paint layer；坐标映射见 placement，不动既有图层。"""
     from .placement import (PlacementError, PreprocessBudget, prepare_png,
                             resource_estimate, resize_rgba, resolve_mode, source_layout)
@@ -325,11 +315,11 @@ def layer_add(png_path, name, above_layer_id=None, offset_x=0, offset_y=0,
         if label in ("png_path", "name") and not value.strip():
             raise OpError("{0} 必须是非空字符串".format(label))
     try:
-        resolve_mode(mode, fit_canvas, offset_x, offset_y)
+        resolve_mode(mode, offset_x, offset_y)
         parent, above_node = _insertion_target(doc, parent_id, above_layer_id)
         png_path = os.path.abspath(os.path.expanduser(png_path))
         encoded, mapping = prepare_png(png_path, doc.width(), doc.height(),
-                                       mode, offset_x, offset_y, fit_canvas, budget=budget)
+                                       mode, offset_x, offset_y, budget=budget)
         sw, sh = mapping["source_size"]
         budget.check("Qt 解码前")
         # Decode ONLY the checked, bounded snapshot; do not reopen a mutable path.

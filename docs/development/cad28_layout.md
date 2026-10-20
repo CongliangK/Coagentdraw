@@ -1,7 +1,5 @@
 # CAD-28：已有六图的离线设定页与受控矢量标注
 
-> **PR-01 目标流程/待迁移提示**：PR-05 目标：新06是正侧背设定与人工结构核对，侧面标角色自身左右，共同基准、基础色与局部说明可独立修改；保存重开后检查。六槽是当前工具限制/可选布局，不是新流程必需六图，排好已有六图不证明生成或一致性。新07独立确认插画事件、镜头与光色，不拿三视图截图当确认稿。 见[现行总纲](<../../design/Krita中枢创作流程_正式执行规范.md>)。此提示不增加现有命令、参数或运行保证。
-
 ## 状态与验收边界
 
 本项只组织**用户已经有的主图、前/侧/背、两个装备拆解**，不调用模型、不生成三视图、不推断人体尺度，更不保证角色一致性。当前交付是离线版式/资源 bundle、人工 apply 准备与受限新建矢量层入口；不是 Krita 实机完成案例，**不关闭 #28**。
@@ -81,12 +79,12 @@ bundle 保存原配置副本、每张原 PNG 原始字节、每张独立缩放 P
 
 `POST /layer/vector` 必填：`svg`（**字符串**）、`name`、`target_document`、`canvas`、`dpi`、`dedicated_document: true`。可选 `parent_id`、`above`；未知字段拒绝（包括 #13 token）。JSON body 1..128KiB，SVG UTF-8最多64KiB、160元素、单行1..120字/共1600字、2..8个callout由布局工具限制。SVG数值有限，0..32768，字体1..96，线宽>0且<=16；不接受负数/越界。
 
-- 只允许扁平 `svg/text/line/rect` 及逐元素属性白名单、十六进制颜色/none、简单字体名；不提供任意 SVG 上传/编辑旧形状。首版不需要 path，直接拒绝；箭头 marker、tspan 等也不承诺。
+- 只允许扁平 `svg/text/line/rect` 及逐元素属性白名单、十六进制颜色/none、简单字体名；不提供任意 SVG 上传/编辑旧形状。输入不接受 path；箭头 marker、tspan 等也不承诺。
 - 拒绝 DTD/entities/处理指令、脚本/事件、CSS/style/url、foreignObject/use/image、任何外部/本地 href、嵌套/未知命名空间/未知属性。文字由 XML 正常转义，原文字符保留。
 - 所有 Krita API 仍通过 [server](<../../core/krita_cowork/server.py>) 既有 `MainThreadBridge` 分派；没有改变桥/超时取消语义/监听安全边界。此接口不是强文档锁。
 - 目标必须是人工确认的**已保存专用活动 .kra 的确切绝对路径**；不切换文档。回调每次新写前及回读后检查活动对象、文件路径、画布、DPI稳定。只能使用本回调稳定活动文档的资源管理器；不把 #13 token 作为安全证明。
 - 仅使用 callable `Document.createVectorLayer(name)`，核对 `type()==vectorlayer`、`addShapesFromSvg`/`shapes` 能力；绝不以 `createNode('vectorlayer')` fallback。创建不等于挂树。
-- parent 默认 root 容器，显式只能 group；root 不能成为显式目标。检查 `addChildNode` bool，并从真实树回读父子、type与above顺序，不重写整树。`above` 共用守卫**仅新增 vectorlayer**，故旧paint/group创建也可定位在同级vector之上。`props` **仅新增vector的opacity/blending_mode能力探测与写后回读**；Alpha Lock仍仅paint，root/其他类型不放开。
+- parent 默认 root 容器，显式只能 group；root 不能成为显式目标。检查 `addChildNode` bool，并从真实树回读父子、type与above顺序，不重写整树。`above` 接受同级 paint/group/vector；`props` 对 vector 提供 opacity/blending_mode 能力探测与写后回读。Alpha Lock 仅用于 paint，root/其他类型拒绝。
 
 ### points / DPI 映射
 
@@ -96,7 +94,7 @@ Shape几何单位是points，即1/72inch；不能当作画布px，也不能硬�
 
 ### 返回值与部分失败
 
-空 `addShapesFromSvg` 返回不视为成功；非空也不等于完整导入。入口回读 `shapes()`，以 `Shape.toSvg(False, False)` 保留文本模式导出。**此官方路径是 `saveDetached`，不是原输入SVG词法透传，也不是 `VectorLayer.toSvg()` 的完整root/DOCTYPE输出**。注册 `SvgShape` 工厂优先；没有成功工厂才有 line→KoPathShape→savePath 的已知正常路径。不能以“实机未知”掩盖旧版tag/全属性Counter对该路径的已知不兼容。
+空 `addShapesFromSvg` 返回不视为成功；非空也不等于完整导入。入口回读 `shapes()`，以 `Shape.toSvg(False, False)` 保留文本模式导出。**此官方路径是 `saveDetached`，不是原输入SVG词法透传，也不是 `VectorLayer.toSvg()` 的完整root/DOCTYPE输出**。注册 `SvgShape` 工厂优先；没有成功工厂才有 line→KoPathShape→savePath 的已知正常路径。回读按下列语义规则核对，不能仅比较 XML 标签或全部属性字面值。
 
 输入白名单不变；另设**仅回读使用的有限语义方言**：
 
@@ -114,18 +112,11 @@ Shape几何单位是points，即1/72inch；不能当作画布px，也不能硬�
 
 ## 官方依据与真实未知
 
-修复轮直接读取本地固定官方commit **`0ddbd236974da74a59f85d799e22915eb208e1c5`** 的原文并核对9个文件SHA/字节数，未联网/执行外部源码；此快照不是本机AppImage构建锁定。亲读Document.h双轴PPI契约、Document.cpp双轴×72 getter及专用VectorLayer创建器，没有setter/fallback。固定核心依据：
+静态依据固定于官方 commit **`0ddbd236974da74a59f85d799e22915eb208e1c5`**；此快照不是本机 AppImage 构建锁定，不证明本机绑定行为：
 
 - [Shape.cpp:172–190](https://github.com/KDE/krita/blob/0ddbd236974da74a59f85d799e22915eb208e1c5/libs/libkis/Shape.cpp#L172-L190)、[SvgWriter.cpp:140–238](https://github.com/KDE/krita/blob/0ddbd236974da74a59f85d799e22915eb208e1c5/libs/flake/svg/SvgWriter.cpp#L140-L238)：detached与path导出。
 - [SvgParser.cpp:1943–2107](https://github.com/KDE/krita/blob/0ddbd236974da74a59f85d799e22915eb208e1c5/libs/flake/svg/SvgParser.cpp#L1943-L2107)、[KoPathShape.cpp:480–490](https://github.com/KDE/krita/blob/0ddbd236974da74a59f85d799e22915eb208e1c5/libs/flake/KoPathShape.cpp#L480-L490)：工厂优先、line fallback与归一化；同文件1070–1149为M/L/C/Z序列化。
 - [Document.h:353–370](https://github.com/KDE/krita/blob/0ddbd236974da74a59f85d799e22915eb208e1c5/libs/libkis/Document.h#L353-L370)、[Document.cpp:431–455](https://github.com/KDE/krita/blob/0ddbd236974da74a59f85d799e22915eb208e1c5/libs/libkis/Document.cpp#L431-L455)：公开双轴getter的PPI；同文件717–723为专用创建器。
-
-以下历史API/可变6.0分支链接只作补充背景，不是本机6.0.4绑定保证或本次固定取证来源：
-
-- [VectorLayer API](https://api.kde.org/legacy/krita/html/classVectorLayer.html)、[6.0 Document.cpp](https://raw.githubusercontent.com/KDE/krita/krita/6.0/libs/libkis/Document.cpp)：专用创建器与泛型Node包装器区别。
-- [6.0 VectorLayer.cpp](https://raw.githubusercontent.com/KDE/krita/krita/6.0/libs/libkis/VectorLayer.cpp)、[Shape.h](https://raw.githubusercontent.com/KDE/krita/krita/6.0/libs/libkis/Shape.h)：字符串导入、空list、优先活动文档资源、points与文本导出默认参数。
-- [6.0 Node.cpp](https://raw.githubusercontent.com/KDE/krita/krita/6.0/libs/libkis/Node.cpp)、[SvgParser.cpp](https://raw.githubusercontent.com/KDE/krita/krita/6.0/libs/flake/svg/SvgParser.cpp)：挂树与SVG解析静态依据。
-- [矢量层手册](https://docs.krita.org/en/reference_manual/layers_and_masks/vector_layers.html)、[文字工具](https://docs.krita.org/en/reference_manual/tools/text.html)、[KRA格式](https://docs.krita.org/en/general_concepts/file_formats/file_kra.html)：能力说明，不是这次输入/本机保存重开的验收。
 
 ## 实际离线映射与 B 门槛
 
@@ -133,12 +124,10 @@ Shape几何单位是points，即1/72inch；不能当作画布px，也不能硬�
 
 [矢量测试](<../../tests/test_vector.py>) 覆盖受控SVG攻击/元素数/字符/数值边界、144/300DPI映射、不支持API/目标/颜色类型拒绝、root/group/above与旧树保护、空list/部分导入/抛错/挂树/回读/刷新失败、活动文档变化、最小above/props扩展、内存HTTP handler与既有bridge分派。测试替身不证明真实Krita/Qt行为。
 
-修复轮先在旧实现跑小fixture红测：官方detached样例被拒、越界tspan/后代tail/root文字被漏过、空嵌套SVG被接受；非PNG/错尺寸/错内容/隐藏RGB替换并改SHA仍prepare成功，相对`./main.png`与`main.png//`未被词法拒绝。修复后这些回归转绿。另以真实CLI子进程独立复现：原spec/六源保持不变，三种替换旧版各输出7payload，修复版全部非零退出且无payload；两类别名旧版plan成功、新版拒绝。证据保留在本地`/tmp/coagentdraw-orchestrate-20261015/cad28-fix1-*`，非真实角色/Qt/Krita验收。
-
 B门槛全部未验，必须另获授权后使用专用测试文档：
 
 1. 明确运行插件来源、本机createVectorLayer/绑定/xRes与yRes能力；测试root和嵌套组、稳定活动目标与错误目标拒绝。
-2. 用户授权的六张真实图、共同尺度和人工头顶锚点，实际300DPI量测paint/文字/线条落点、透明度与RGBA通道；非方形DPI首版不支持。
+2. 用户授权的六张真实图、共同尺度和人工头顶锚点，实际300DPI量测paint/文字/线条落点、透明度与RGBA通道；非方形DPI不支持。
 3. 在Krita GUI真正改中文/拉丁文字内容、字体/字号/基线，移动参考线与指向线端点；确认文字未变path/栅格。记录字体替代，不以SVG源/形状数量/视觉相似替代。
 4. 另存专用 `.kra`、关闭仅该测试文档、重开后逐层核对类型/透明度，重新改字与线；旧会话UUID不作为安全续接凭据。
 5. 检查用户原层/原作品从未改变。只有完成真实六图案例与可编辑保存重开，才讨论issue关闭。

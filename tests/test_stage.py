@@ -102,7 +102,7 @@ class StageTests(unittest.TestCase):
         self.fake = Fake(self.document)
 
     def setup_stage(self, number=4, **kwargs):
-        return stage.execute(number, self.document, self.state, self.fake.request, **kwargs)
+        return stage.execute(number, self.document, self.state, self.fake.request, role="character", **kwargs)
 
     def data(self):
         return json.loads(self.state.read_text(encoding="utf-8"))
@@ -110,29 +110,9 @@ class StageTests(unittest.TestCase):
     def save_data(self, data):
         self.state.write_text(json.dumps(data), encoding="utf-8")
 
-    def test_eight_presets_and_repeated_setup(self):
-        for number in range(1, 9):
-            first = self.setup_stage(number)
-            self.assertEqual(len(first["created"]), len(stage.specs(number)))
-            count = self.fake.posts
-            second = self.setup_stage(number)
-            self.assertEqual(second["created"], [])
-            self.assertEqual(self.fake.posts, count)
-        data = self.data()
-        self.assertEqual(len(data["groups"]), sum(len(stage.specs(n)) for n in range(1, 9)))
-        for key, record in data["groups"].items():
-            self.assertEqual(record["status"], "verified")
-            self.assertIn(stage.marker(record["token"]), self.fake.nodes()[record["id"]]["name"])
-            expected_parent = stage.ALL_SPECS[key][1]
-            if expected_parent:
-                self.assertIn(self.fake.nodes()[record["id"]], self.fake.nodes()[data["groups"][expected_parent]["id"]]["children"])
-        self.assertEqual(stage.PRESETS[4][1], ("剪影", "结构", "明暗", "配色"))
-        self.assertEqual(stage.PRESETS[6][1], ("Paintover", "修改前", "修改后", "诊断"))
-        self.assertEqual(stage.PRESETS[7][1], ("主图", "辅助视图", "Callout"))
-        self.assertEqual(stage.PRESETS[8][1], ("构图", "灰阶", "色稿", "精修"))
 
     def test_unowned_same_name_conflict_preflight_no_partial_creation(self):
-        for label in ("04 探索", "剪影", "结构", "明暗", "配色"):
+        for label in ("00_简要意图与保持要点", "拼贴原型", "服装结构", "粗线稿", "配色"):
             with self.subTest(label=label):
                 self.fake.root["children"] = []
                 self.fake.add(label, kind="paintlayer")
@@ -144,8 +124,8 @@ class StageTests(unittest.TestCase):
     def test_rename_reorder_move_without_reset(self):
         self.setup_stage()
         data = self.data()
-        outer = self.fake.nodes()[data["groups"]["4"]["id"]]
-        child = self.fake.nodes()[data["groups"]["4/剪影"]["id"]]
+        outer = self.fake.nodes()[data["groups"]["character/20_探索"]["id"]]
+        child = self.fake.nodes()[data["groups"]["character/20_探索/剪影"]["id"]]
         child["name"] = "用户改名，无标记"
         outer["name"] = "用户外组"
         outer["children"].reverse()
@@ -158,12 +138,12 @@ class StageTests(unittest.TestCase):
         self.assertEqual(self.fake.root, before)
         self.assertEqual(self.fake.posts, count)
 
-    def test_partial_existing_preset_creates_only_missing(self):
-        self.setup_stage(2)
-        previous = copy.deepcopy(self.fake.root["children"])
-        result = self.setup_stage(3)
-        self.assertEqual(result["created"], ["3", "3/提案卡"])
-        self.assertEqual(self.fake.root["children"][:1], previous)
+    def test_repeated_setup_for_same_document_role(self):
+        first = self.setup_stage(4)
+        self.assertEqual(len(first["created"]), len(stage.specs(4, role="character")))
+        count = self.fake.posts
+        self.assertEqual(self.setup_stage(5)["created"], [])
+        self.assertEqual(self.fake.posts, count)
 
     def test_prewrite_read_failure_resumes_only_not_yet_attempted_groups(self):
         original = self.fake.request
@@ -175,41 +155,41 @@ class StageTests(unittest.TestCase):
                     raise OSError("read failed before second POST")
             return original(path, payload)
         with self.assertRaises(OSError):
-            stage.execute(4, self.document, self.state, interrupted)
+            stage.execute(4, self.document, self.state, interrupted, role="character")
         self.assertIsNone(self.data()["pending"])
-        self.assertEqual(list(self.data()["groups"]), ["4"])
+        self.assertEqual(list(self.data()["groups"]), ["character/00_简要意图与保持要点"])
         original_root = copy.deepcopy(self.fake.root["children"][0])
         result = self.setup_stage()
-        self.assertEqual(result["created"], ["4/剪影", "4/结构", "4/明暗", "4/配色"])
-        self.assertEqual(self.fake.posts, 5)
+        self.assertEqual(result["created"], [key for key, _, _ in stage.specs(4, role="character")][1:])
+        self.assertEqual(self.fake.posts, len(stage.specs(4, role="character")))
         self.assertEqual(self.fake.root["children"][0]["id"], original_root["id"])
 
     def test_stale_id_reparsed_by_token_not_same_name(self):
         self.setup_stage()
         data = self.data()
-        data["groups"]["4/剪影"]["id"] = "expired"
+        data["groups"]["character/20_探索/剪影"]["id"] = "expired"
         self.save_data(data)
         count = self.fake.posts
         self.setup_stage()
         self.assertEqual(self.fake.posts, count)
-        self.assertNotEqual(self.data()["groups"]["4/剪影"]["id"], "expired")
+        self.assertNotEqual(self.data()["groups"]["character/20_探索/剪影"]["id"], "expired")
 
     def test_expired_id_and_plain_same_name_stop(self):
         self.setup_stage()
         data = self.data()
-        record = data["groups"]["4/剪影"]
+        record = data["groups"]["character/20_探索/剪影"]
         node = self.fake.nodes()[record["id"]]
         node["name"], node["id"] = "剪影", "new-session-id"
         count = self.fake.posts
         with self.assertRaisesRegex(stage.StageError, "身份失效"):
-            self.setup_stage(6)
+            self.setup_stage(5)
         self.assertEqual(self.fake.posts, count)
 
     def test_reopen_reparse_preserves_layout_and_no_duplicate(self):
         self.setup_stage()
         data = self.data()
-        child = self.fake.nodes()[data["groups"]["4/剪影"]["id"]]
-        child["name"] = "重命名但保留 " + stage.marker(data["groups"]["4/剪影"]["token"])
+        child = self.fake.nodes()[data["groups"]["character/20_探索/剪影"]["id"]]
+        child["name"] = "重命名但保留 " + stage.marker(data["groups"]["character/20_探索/剪影"]["token"])
         self.fake.root["children"][0]["children"].reverse()
         self.fake.reopen()
         before, count = copy.deepcopy(self.fake.root), self.fake.posts
@@ -220,7 +200,7 @@ class StageTests(unittest.TestCase):
 
     def test_reopen_removed_marker_even_if_old_node_id_survives_stops(self):
         self.setup_stage()
-        node = self.fake.nodes()[self.data()["groups"]["4/剪影"]["id"]]
+        node = self.fake.nodes()[self.data()["groups"]["character/20_探索/剪影"]["id"]]
         node["name"] = "用户完全改名"
         self.fake.pid += 1
         count = self.fake.posts
@@ -231,7 +211,7 @@ class StageTests(unittest.TestCase):
     def test_duplicate_marker_and_id_marker_disagreement_stop(self):
         self.setup_stage()
         data = self.data()
-        record = data["groups"]["4/剪影"]
+        record = data["groups"]["character/20_探索/剪影"]
         existing = self.fake.nodes()[record["id"]]
         duplicate = self.fake.add(existing["name"])
         count = self.fake.posts
@@ -246,7 +226,7 @@ class StageTests(unittest.TestCase):
     def test_wrong_node_type_and_root_never_adopted(self):
         self.setup_stage()
         data = self.data()
-        group = self.fake.nodes()[data["groups"]["4/剪影"]["id"]]
+        group = self.fake.nodes()[data["groups"]["character/20_探索/剪影"]["id"]]
         group["type"] = "paintlayer"
         with self.assertRaisesRegex(stage.StageError, "身份失效"):
             self.setup_stage()
@@ -265,7 +245,7 @@ class StageTests(unittest.TestCase):
         self.setup_stage()
         count = self.fake.posts
         with self.assertRaisesRegex(stage.StageError, "另一文档"):
-            stage.execute(4, other, self.state, self.fake.request)
+            stage.execute(4, other, self.state, self.fake.request, role="character")
         original = self.fake.request
         def duplicate(path, payload=None):
             result = original(path, payload)
@@ -273,7 +253,7 @@ class StageTests(unittest.TestCase):
                 result["documents"].append({**result["documents"][0], "active": False})
             return result
         with self.assertRaisesRegex(stage.StageError, "多份"):
-            stage.execute(4, self.document, self.state, duplicate)
+            stage.execute(4, self.document, self.state, duplicate, role="character")
         self.assertEqual(self.fake.posts, count)
 
     def test_document_switch_before_write_stops_and_after_write_is_unconfirmed(self):
@@ -288,7 +268,7 @@ class StageTests(unittest.TestCase):
                     self.fake.document = str(other)
             return original(path, payload)
         with self.assertRaisesRegex(stage.StageError, "活动文档错误"):
-            stage.execute(4, self.document, self.state, before)
+            stage.execute(4, self.document, self.state, before, role="character")
         self.assertEqual(self.fake.posts, 0)
         self.fake.document = str(self.document)
         def after(path, payload=None):
@@ -297,7 +277,7 @@ class StageTests(unittest.TestCase):
                 self.fake.document = str(other)
             return result
         with self.assertRaisesRegex(stage.StageError, "未确认"):
-            stage.execute(4, self.document, self.state, after)
+            stage.execute(4, self.document, self.state, after, role="character")
         self.assertEqual(self.fake.posts, 1)
         self.assertIsNotNone(self.data()["pending"])
         self.assertIn("failure_readback_failed", [e["kind"] for e in self.data()["events"]])
@@ -306,7 +286,7 @@ class StageTests(unittest.TestCase):
         self.setup_stage()
         count = self.fake.posts
         with self.assertRaisesRegex(stage.StageError, "不属于此 sidecar"):
-            stage.execute(4, self.document, self.root / "other.cwb-stage.json", self.fake.request)
+            stage.execute(4, self.document, self.root / "other.cwb-stage.json", self.fake.request, role="character")
         self.assertEqual(self.fake.posts, count)
 
     def test_partial_failures_journal_and_never_automatically_retry(self):
@@ -314,13 +294,13 @@ class StageTests(unittest.TestCase):
             with self.subTest(mode=mode):
                 state = self.root / (mode + ".cwb-stage.json")
                 fake = Fake(self.document)
-                fake.fail_at, fake.mode = 2, mode
+                fake.fail_at, fake.mode = 4, mode
                 expected = KeyboardInterrupt if mode == "interrupt" else stage.StageError
                 with self.assertRaises(expected):
-                    stage.execute(4, self.document, state, fake.request)
+                    stage.execute(4, self.document, state, fake.request, role="character")
                 data = json.loads(state.read_text(encoding="utf-8"))
                 self.assertIsNotNone(data["pending"])
-                self.assertEqual(data["groups"]["4"]["status"], "verified")
+                self.assertEqual(data["groups"]["character/00_简要意图与保持要点"]["status"], "verified")
                 self.assertIn("request", data["pending"])
                 self.assertIn("unconfirmed", [e["kind"] for e in data["events"]])
                 self.assertIn("failure_readback_failed" if mode == "readback" else "failure_readback",
@@ -328,7 +308,7 @@ class StageTests(unittest.TestCase):
                 count = fake.posts
                 fake.read_fail = False
                 with self.assertRaisesRegex(stage.StageError, "未确认操作"):
-                    stage.execute(4, self.document, state, fake.request)
+                    stage.execute(4, self.document, state, fake.request, role="character")
                 self.assertEqual(fake.posts, count)
 
     def test_first_journal_write_failure_prevents_post(self):
@@ -365,27 +345,6 @@ class StageTests(unittest.TestCase):
             self.setup_stage()
         self.assertEqual(self.fake.posts, 1)
 
-    def test_diagnostic_explicit_existing_path_and_mock_contract(self):
-        png = self.root / "诊断.png"
-        png.write_bytes(PNG)
-        with self.assertRaisesRegex(stage.StageError, "先 stage setup"):
-            self.setup_stage(6, diagnostic=png)
-        self.setup_stage(6)
-        data = self.data()
-        target = self.fake.nodes()[data["groups"]["6/诊断"]["id"]]
-        target["name"] = "改名后的诊断"
-        count = self.fake.posts
-        self.setup_stage(6, diagnostic=png, name="#18 已有诊断")
-        self.assertEqual(self.fake.posts, count + 1)
-        endpoint, payload = [call for call in self.fake.calls if call[0] == "/layer/add"][-1]
-        self.assertEqual(payload, {"png_path": str(png), "name": "#18 已有诊断", "parent_id": target["id"]})
-        self.assertEqual(target["children"][0]["type"], "paintlayer")
-        self.assertTrue(any(e.get("source_sha256") for e in self.data()["events"]))
-        # 导入是显式追加，不声称幂等导入、像素写入验证或保存/重开通过。
-        for missing in (self.root / "missing.png", self.document):
-            with self.assertRaisesRegex(stage.StageError, "PNG"):
-                self.setup_stage(6, diagnostic=missing)
-        self.assertEqual(self.fake.posts, count + 1)
 
     def test_bad_sidecar_and_project_state_never_overwritten(self):
         self.state.write_text("{broken", encoding="utf-8")
@@ -399,7 +358,7 @@ class StageTests(unittest.TestCase):
         project = self.root / "project_state.json"
         project.write_text('{"schema_version":1}')
         with self.assertRaisesRegex(stage.StageError, "独立 sidecar"):
-            stage.execute(4, self.document, project, self.fake.request)
+            stage.execute(4, self.document, project, self.fake.request, role="character")
         self.assertEqual(project.read_text(), '{"schema_version":1}')
         self.assertEqual(self.fake.posts, 0)
 
@@ -413,7 +372,7 @@ class StageTests(unittest.TestCase):
         store = stage.Store(state)
         with store.locked():
             with self.assertRaisesRegex(stage.StageError, "忙"):
-                stage.execute(4, self.document, state, self.fake.request)
+                stage.execute(4, self.document, state, self.fake.request, role="character")
         self.assertEqual(self.fake.posts, 0)
 
     def test_cli_setup_and_status_offline(self):
@@ -421,32 +380,19 @@ class StageTests(unittest.TestCase):
             self.assertTrue(url.startswith(cwb.Krita))
             return self.fake.request(url[len(cwb.Krita):], payload)
         with patch.object(cwb, "http", side_effect=http), contextlib.redirect_stdout(io.StringIO()) as out:
-            cwb.main(["stage", "setup", "2", "--document", str(self.document), "--state", str(self.state)])
+            cwb.main(["stage", "setup", "2", "--role", "ideation", "--document", str(self.document), "--state", str(self.state)])
         self.assertEqual(json.loads(out.getvalue())["stage"], 2)
         with patch.object(cwb, "http", side_effect=AssertionError("no network")), contextlib.redirect_stdout(io.StringIO()) as out:
             cwb.main(["stage", "status", "--state", str(self.state)])
-        self.assertEqual(json.loads(out.getvalue())["schema_version"], 1)
+        self.assertEqual(json.loads(out.getvalue())["schema_version"], 2)
 
-    def test_cli_import_diagnostic_uses_explicit_path_and_returns_new_layer(self):
-        self.setup_stage(6)
-        png = self.root / "existing.png"
-        png.write_bytes(PNG)
-        def http(url, payload=None, timeout=60):
-            return self.fake.request(url[len(cwb.Krita):], payload)
-        with patch.object(cwb, "http", side_effect=http), contextlib.redirect_stdout(io.StringIO()) as out:
-            cwb.main(["stage", "import-diagnostic", str(png), "--document", str(self.document),
-                      "--state", str(self.state), "--name", "现有诊断"])
-        result = json.loads(out.getvalue())
-        self.assertTrue(result["diagnostic_imported"])
-        self.assertIn(result["imported_layer"]["id"], self.fake.nodes())
-        self.assertEqual(result["imported_layer"]["name"], "现有诊断")
 
     def test_help_without_stage_module_service_cache_or_bytecode(self):
         script = self.root / "core" / "cwb.py"
         script.parent.mkdir()
         shutil.copyfile(ROOT / "core" / "cwb.py", script)
         for args in (["--help"], ["stage", "--help"], ["stage", "setup", "--help"],
-                     ["stage", "import-diagnostic", "--help"], ["stage", "status", "--help"]):
+                     ["stage", "status", "--help"]):
             wf = self.root / "absent-workflows"
             process = subprocess.run([sys.executable, str(script), *args], cwd=self.root,
                                      env={**os.environ, "CWB_WF_DIR": str(wf)}, capture_output=True, text=True)

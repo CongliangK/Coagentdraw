@@ -1,8 +1,7 @@
-"""PR-02: finite, versioned workflow vocabulary; no I/O or artistic approval."""
-LEGACY_WORKFLOW = "legacy-eight-stage-v1"
+"""Current finite, versioned workflow vocabulary; no I/O or artistic approval."""
 WORKFLOW = "krita-character-illustration-v1"
 STAGES = (
-    ("text_seeds", "文本创作起点"),
+    ("text_seeds", "角色设计意图卡"),
     ("research_imagination", "联想与前期调研"),
     ("concept_selection", "创意汇总与选择"),
     ("character_exploration", "角色视觉探索"),
@@ -11,14 +10,14 @@ STAGES = (
     ("illustration_planning", "插画方案探索"),
     ("illustration_production", "插画制作与交付"),
 )
-DOCUMENT_STAGES = {"ideation": (1, 2, 3), "character": (4, 5),
+DOCUMENT_STAGES = {"ideation": (1, 2, 3), "character": (2, 4, 5),
                    "turnaround": (6,), "illustration": (7, 8)}
 # Each tuple describes a group and its children, not generated artwork.
 DOCUMENT_GROUPS = {
     "ideation": (("00_阅读说明与当前问题", ()), ("10_素材簇", ()),
                  ("20_待比较创意", ()), ("30_本轮选中", ()), ("80_暂存与未选", ())),
     "character": (("00_简要意图与保持要点", ()), ("10_参考", ()),
-                  ("20_探索", ("剪影", "服装结构", "粗线稿", "配色")),
+                  ("20_探索", ("拼贴原型", "剪影", "服装结构", "粗线稿", "配色")),
                   ("30_主稿", ("线稿", "基础色", "局部说明")),
                   ("40_修改候选", ()), ("90_诊断与比较", ())),
     "turnaround": (("00_说明与基准线", ()),
@@ -33,7 +32,7 @@ DOCUMENT_GROUPS = {
 }
 # Minimal declared outcomes; software checks references, never aesthetic sufficiency.
 REQUIRED_ROLES = {
-    2: {"research_board"}, 4: {"character_exploration"},
+    4: {"character_exploration"},
     5: {"character_master_lineart", "character_master_basecolor"},
     6: {"turnaround_front", "turnaround_side", "turnaround_back"},
     7: {"illustration_plan"}, 8: {"final_illustration", "editable_source", "delivery_manifest"},

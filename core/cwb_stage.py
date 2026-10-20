@@ -6,7 +6,6 @@ HTTP 创建和 sidecar 写入不是原子事务；未确认请求始终阻止自
 """
 from contextlib import contextmanager
 from datetime import datetime, timezone
-import hashlib
 import json
 import os
 from pathlib import Path
@@ -15,20 +14,9 @@ import stat
 import tempfile
 import uuid
 
-from cwb_workflow import WORKFLOW, LEGACY_WORKFLOW, DOCUMENT_STAGES, document_specs
+from cwb_workflow import WORKFLOW, DOCUMENT_STAGES, document_specs
 
 
-# 最小组织预设，不表示阶段完成，也不自动生成设计内容。
-PRESETS = {
-    1: ("意图", ("意图卡", "风格锚点")),
-    2: ("调研", ("参考板",)),
-    3: ("提案", ("提案卡",)),
-    4: ("探索", ("剪影", "结构", "明暗", "配色")),
-    5: ("锁定", ("锁定方案", "设计支柱")),
-    6: ("收敛", ("Paintover", "修改前", "修改后", "诊断")),
-    7: ("交付", ("主图", "辅助视图", "Callout")),
-    8: ("插画", ("构图", "灰阶", "色稿", "精修")),
-}
 MARKER = re.compile(r"\[cwb:([0-9a-f-]{36})\]")
 
 
@@ -40,22 +28,14 @@ def now():
     return datetime.now(timezone.utc).isoformat()
 
 
-def specs(number, workflow=LEGACY_WORKFLOW, role=None):
-    if type(number) is not int or number not in PRESETS:
+def specs(number, workflow=WORKFLOW, role=None):
+    if type(number) is not int or not 1 <= number <= 8:
         raise StageError("阶段必须为 1–8")
-    if workflow == WORKFLOW:
-        if role not in DOCUMENT_STAGES or number not in DOCUMENT_STAGES[role]:
-            raise StageError("新 workflow 必须选择兼容阶段的 --role 文档角色")
-        return document_specs(role)
-    if workflow != LEGACY_WORKFLOW or role is not None:
-        raise StageError("未知 workflow 或旧预设不支持文档角色")
-    title, children = PRESETS[number]
-    root = str(number)
-    return [(root, "{:02d} {}".format(number, title), None)] + [
-        (root + "/" + label, label, root) for label in children]
-
-
-ALL_SPECS = {key: (label, parent) for number in PRESETS for key, label, parent in specs(number)}
+    if workflow != WORKFLOW:
+        raise StageError("未知 workflow")
+    if role not in DOCUMENT_STAGES or number not in DOCUMENT_STAGES[role]:
+        raise StageError("必须选择兼容阶段的 --role 文档角色")
+    return document_specs(role)
 
 
 def marker(token):
@@ -64,14 +44,11 @@ def marker(token):
 
 def validate(data):
     try:
-        if type(data["schema_version"]) is not int or data["schema_version"] not in (1, 2):
-            raise ValueError("未知版本")
-        if data["schema_version"] == 1:
-            definitions = ALL_SPECS  # frozen old keys, never checked with v2 labels
-        else:
-            if data["workflow_id"] != WORKFLOW or data["document_role"] not in DOCUMENT_STAGES:
-                raise ValueError("未知 workflow/文档角色")
-            definitions = {key: (label, parent) for key, label, parent in document_specs(data["document_role"])}
+        if type(data["schema_version"]) is not int or data["schema_version"] != 2:
+            raise ValueError("未知版本；需要 schema_version=2")
+        if data["workflow_id"] != WORKFLOW or data["document_role"] not in DOCUMENT_STAGES:
+            raise ValueError("未知 workflow/文档角色")
+        definitions = {key: (label, parent) for key, label, parent in document_specs(data["document_role"])}
         uuid.UUID(data["sidecar_id"])
         if not Path(data["document"]).is_absolute():
             raise ValueError("文档必须为绝对路径")
@@ -98,13 +75,13 @@ def validate(data):
                 raise ValueError("无效会话记录")
         pending = data["pending"]
         if pending is not None:
-            if pending["kind"] not in ("group", "diagnostic") or not isinstance(pending["request"], dict):
+            if pending["kind"] != "group" or not isinstance(pending["request"], dict):
                 raise ValueError("无效待确认操作")
             uuid.UUID(pending["operation_id"])
-            if pending["kind"] == "group" and pending.get("key") not in data["groups"]:
+            if pending.get("key") not in data["groups"]:
                 raise ValueError("待确认操作缺少组记录")
         for key, group in data["groups"].items():
-            if group["status"] == "pending" and (pending is None or pending["kind"] != "group" or pending.get("key") != key):
+            if group["status"] == "pending" and (pending is None or pending.get("key") != key):
                 raise ValueError("未确认组缺少对应操作记录")
     except (KeyError, TypeError, ValueError, AttributeError) as exc:
         raise StageError("阶段 sidecar 损坏；保留原文件并人工检查: " + str(exc)) from exc
@@ -272,81 +249,52 @@ def canonical_document(value):
     return str(path)
 
 
-def execute(number, document, state_path, request, diagnostic=None, name="诊断 PNG", *, workflow=None, role=None):
+def execute(number, document, state_path, request, *, workflow=None, role=None):
     """request(path, payload=None) 由 CLI 注入；mock 无网络/Qt 依赖。"""
-    if workflow is not None and workflow not in (LEGACY_WORKFLOW, WORKFLOW):
+    if workflow is not None and workflow != WORKFLOW:
         raise StageError("未知 workflow")
-    if workflow is not None and (role is not None or workflow == LEGACY_WORKFLOW):
-        specs(number, workflow, role)  # reject incompatible explicit context before any request
+    if role is not None:
+        specs(number, WORKFLOW, role)
     document = canonical_document(document)
-    source = None
-    if diagnostic is not None:
-        if number != 6:
-            raise StageError("诊断 PNG 仅导入第六阶段")
-        source = Path(diagnostic).expanduser().resolve()
-        if not source.is_file() or source.read_bytes()[:8] != b"\x89PNG\r\n\x1a\n":
-            raise StageError("必须显式提供已存在的 PNG 路径；不生成诊断图")
-        if not isinstance(name, str) or not name.strip() or "[cwb:" in name:
-            raise StageError("无效导入图层名")
     store = Store(state_path)
     with store.locked():
         data = store.load()
         if data is not None and data["document"] != document:
             raise StageError("sidecar 绑定了另一文档，拒绝写入")
-        bound_workflow = (WORKFLOW if data and data["schema_version"] == 2 else LEGACY_WORKFLOW)
-        selected_workflow = workflow or bound_workflow
-        selected_role = role or (data.get("document_role") if data else None)
-        if data and (selected_workflow != bound_workflow or selected_role != data.get("document_role")):
-            raise StageError("sidecar workflow/文档角色冲突；旧 sidecar 不自动升级")
-        wanted = specs(number, selected_workflow, selected_role)
-        if source is not None and selected_workflow != LEGACY_WORKFLOW:
-            raise StageError("import-diagnostic 保留旧06接口；新文档请显式使用通用 add，不按编号误导入")
+        selected_role = role or (data["document_role"] if data else None)
+        if data and selected_role != data["document_role"]:
+            raise StageError("sidecar 文档角色冲突")
+        wanted = specs(number, WORKFLOW, selected_role)
         snap = snapshot(request, document)
         if data is None:
-            if source is not None:
-                raise StageError("请先 stage setup 6；导入不会自动初始化")
-            data = {"schema_version": 1, "sidecar_id": str(uuid.uuid4()),
-                    "document": document, "session": snap["session"],
+            data = {"schema_version": 2, "workflow_id": WORKFLOW, "document_role": selected_role,
+                    "sidecar_id": str(uuid.uuid4()), "document": document, "session": snap["session"],
                     "groups": {}, "pending": None, "events": []}
-            if selected_workflow == WORKFLOW:
-                data.update(schema_version=2, workflow_id=WORKFLOW, document_role=selected_role)
         if data["pending"] is not None:
-            # 已发送请求即使树里有标记也可能未完成；不得把部分成功当成成功。
             raise StageError("存在未确认操作；先人工核对 sidecar pending 与最新 layers，禁止自动重试")
         ids = resolve(data, snap)
-        ensure_no_conflicts(data, snap, wanted if source is None else [])
-        # 重新解析后才更新会话和 ID，不会恢复用户改名/移动/顺序。
+        ensure_no_conflicts(data, snap, wanted)
         for key, node_id in ids.items():
             data["groups"][key]["id"] = node_id
         data["session"] = snap["session"]
         store.save(data)
-        created, imported = [], None
-        if source is not None:
-            target = "6/诊断"
-            if target not in ids:
-                raise StageError("缺少已登记诊断组；请先 stage setup 6")
-            payload = {"png_path": str(source), "name": name, "parent_id": ids[target]}
-            operation = {"operation_id": str(uuid.uuid4()), "kind": "diagnostic", "request": payload,
-                         "source_sha256": hashlib.sha256(source.read_bytes()).hexdigest()}
-            imported, _ = perform(store, data, request, document, snap, operation, "/layer/add", "paintlayer")
-        else:
-            for key, label, parent in wanted:
-                if key in ids:
-                    continue
-                token = str(uuid.uuid4())
-                group_name = label + " " + marker(token)
-                data["groups"][key] = {"token": token, "id": None, "status": "pending", "name": group_name}
-                payload = {"name": group_name, "parent_id": ids[parent] if parent else None}
-                operation = {"operation_id": str(uuid.uuid4()), "kind": "group", "key": key, "request": payload}
-                result, snap = perform(store, data, request, document, snap, operation, "/layer/group", "grouplayer")
-                ids[key] = result["id"]
-                created.append(key)
-        return {"stage": number, "workflow_id": selected_workflow, "document_role": selected_role,
-                "created": created, "groups": ids, "state": str(store.path),
-                "diagnostic_imported": source is not None, "imported_layer": imported}
+        created = []
+        for key, label, parent in wanted:
+            if key in ids:
+                continue
+            token = str(uuid.uuid4())
+            group_name = label + " " + marker(token)
+            data["groups"][key] = {"token": token, "id": None, "status": "pending", "name": group_name}
+            payload = {"name": group_name, "parent_id": ids[parent] if parent else None}
+            operation = {"operation_id": str(uuid.uuid4()), "kind": "group", "key": key, "request": payload}
+            result, snap = perform(store, data, request, document, snap, operation)
+            ids[key] = result["id"]
+            created.append(key)
+        return {"stage": number, "workflow_id": WORKFLOW, "document_role": selected_role,
+                "created": created, "groups": ids, "state": str(store.path)}
 
 
-def perform(store, data, request, document, before, operation, endpoint, expected_type):
+def perform(store, data, request, document, before, operation):
     # 再检查活动文档/会话；现有接口没有原子的 expected-document 条件。
     current = snapshot(request, document)
     if current["session"] != before["session"]:
@@ -358,10 +306,10 @@ def perform(store, data, request, document, before, operation, endpoint, expecte
     data["pending"] = operation
     event(data, "request_prepared", operation_id=operation["operation_id"],
           operation_kind=operation["kind"], request=operation["request"],
-          key=operation.get("key"), source_sha256=operation.get("source_sha256"))
+          key=operation["key"])
     store.save(data)  # 必须在首次写请求之前可追溯。
     try:
-        response = request(endpoint, operation["request"])
+        response = request("/layer/group", operation["request"])
         operation["response"] = response
         event(data, "response_received", operation_id=operation["operation_id"], response=response)
         store.save(data)
@@ -371,13 +319,12 @@ def perform(store, data, request, document, before, operation, endpoint, expecte
         node_id = response.get("id")
         node = after["nodes"].get(node_id)
         parent_id = operation["request"].get("parent_id") or current["session"]["root"]
-        if (node is None or node_id in current["nodes"] or node.get("type") != expected_type or
+        if (node is None or node_id in current["nodes"] or node.get("type") != "grouplayer" or
                 node.get("name") != operation["request"]["name"] or after["parents"][node_id] != parent_id or
                 response.get("parent_id") != parent_id):
             raise StageError("创建后回读不符；可能已经留下新节点")
-        if operation["kind"] == "group":
-            group = data["groups"][operation["key"]]
-            group.update(id=node_id, status="verified")
+        group = data["groups"][operation["key"]]
+        group.update(id=node_id, status="verified")
         event(data, "verified", operation_id=operation["operation_id"], id=node_id)
         data["pending"] = None
         store.save(data)
@@ -397,7 +344,7 @@ def perform(store, data, request, document, before, operation, endpoint, expecte
             raise StageError("请求可能已生效且失败记录写入失败；保留发送前 pending，人工核对: " + str(save_exc)) from exc
         if isinstance(exc, KeyboardInterrupt):
             raise
-        raise StageError("创建/导入未确认；不自动回滚或重试，查看 sidecar pending: " + str(exc)) from exc
+        raise StageError("创建未确认；不自动回滚或重试，查看 sidecar pending: " + str(exc)) from exc
 
 
 def run(args, http, base):
@@ -415,8 +362,6 @@ def run(args, http, base):
         except SystemExit as exc:
             raise StageError(str(exc)) from exc
 
-    result = execute(args.number if args.stage_cmd == "setup" else 6,
-                     args.document, args.state, request,
-                     diagnostic=getattr(args, "png", None), name=getattr(args, "name", "诊断 PNG"),
-                     workflow=getattr(args, "workflow", None), role=getattr(args, "role", None))
+    result = execute(args.number, args.document, args.state, request,
+                     workflow=args.workflow, role=args.role)
     print(json.dumps(result, ensure_ascii=False, indent=2))

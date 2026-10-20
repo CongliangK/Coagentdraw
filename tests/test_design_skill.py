@@ -86,7 +86,7 @@ class DesignSkillBundleTests(unittest.TestCase):
             "表现风格", "时间锚点", "身份与行动需求", "时代与文化参照",
         ])
         self.assertIn("`text_seeds`", text)
-        self.assertIn("视觉设计版 v3", text)
+        self.assertIn("视觉设计版", text)
         self.assertNotIn("<details>", text)
         self.assertNotIn("</details>", text)
 

@@ -1,6 +1,5 @@
-"""PR-02 A evidence only: synthetic files/mock trees, never real art or Krita."""
+"""Offline evidence only: synthetic files/mock trees, never real art or Krita."""
 import copy
-import hashlib
 import json
 import os
 from pathlib import Path
@@ -16,19 +15,9 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "core"))
 import cwb
 import cwb_project as p
-import cwb_export as export
 import cwb_stage as stage
-from cwb_workflow import WORKFLOW, LEGACY_WORKFLOW, DOCUMENT_STAGES
+from cwb_workflow import WORKFLOW, DOCUMENT_STAGES
 from test_stage import Fake
-
-
-def legacy_state():
-    """Frozen schema1 fixture: do not use new init to manufacture old semantics."""
-    return {"schema_version": 1, "project_id": str(uuid.uuid4()), "name": "旧测试项目",
-            "revision": 6, "created_at": "fixture-time", "updated_at": "fixture-time",
-            "current_stage": 6, "intent_card": "旧意图", "design_pillars": [], "style_anchors": [],
-            "stages": [{"stage": i, "directory": p.stage_dir(i), "status": "completed" if i == 6 else "pending"} for i in range(1, 9)],
-            "stage_history": [{"from": 5, "to": 6, "at": "fixture-time", "note": "旧收敛"}], "assets": []}
 
 
 class WorkflowProjectTests(unittest.TestCase):
@@ -73,105 +62,57 @@ class WorkflowProjectTests(unittest.TestCase):
         self.update(lambda r, d: p.add_decision(r, d, kind, target, action, "仅本轮测试", "人工转录：测试指令，不是用户作品批准", "fixture", outcomes))
         return self.state()["decisions"][-1]
 
-    def install_legacy(self):
-        data = legacy_state()
-        path = self.file("stages/06-收敛/old.png", b"old fixture")
-        digest, size = p.fingerprint(self.root, path)
-        data["assets"] = [{"id": str(uuid.uuid4()), "path": path, "stage": 6, "category": "final", "sha256": digest,
-                           "size": size, "note": "legacy", "recorded_at": "fixture-time"}]
-        (self.root / p.STATE).write_text(json.dumps(data, ensure_ascii=False))
-        return data, (self.root / p.STATE).read_bytes()
 
-    def test_T01_schema1_read_only_old_stage6_and_export(self):
-        data, raw = self.install_legacy()
-        (self.root / p.LOCK).unlink()  # fixture verifies reads don't even create a lock
-        listing = p.inspect(self.root)
-        self.assertEqual(listing["workflow"], LEGACY_WORKFLOW)
-        self.assertEqual(listing["state"]["stages"][5]["directory"], "stages/06-收敛")
-        self.assertEqual(listing["asset_checks"][0]["status"], "ok")
-        self.assertFalse((self.root / p.LOCK).exists())
-        report = export.export_project(self.root, self.parent / "old-export", [data["assets"][0]["id"]])
-        self.assertEqual(report["current_stage"], 6)
-        self.assertEqual((self.parent / "old-export" / p.STATE).read_bytes(), raw)
-        self.assertEqual(p.initialize(self.root, data["name"]), data)
-        with self.assertRaisesRegex(p.ProjectError, "只读"):
-            self.update(lambda r, d: d.update(name="mutated"))
-        self.assertEqual((self.root / p.STATE).read_bytes(), raw)
+    def test_unsupported_project_versions_are_rejected_without_rewriting(self):
+        original = self.state()
+        for version in (0, 1, 3, True, "2"):
+            with self.subTest(version=version):
+                raw = json.dumps({**original, "schema_version": version}).encode()
+                (self.root / p.STATE).write_bytes(raw)
+                with self.assertRaises(p.ProjectError):
+                    p.inspect(self.root)
+                with self.assertRaises(p.ProjectError):
+                    self.update(lambda r, d: d.update(name="must not write"))
+                self.assertEqual((self.root / p.STATE).read_bytes(), raw)
+        (self.root / p.STATE).write_text(json.dumps(original))
 
-    def test_T02_plan_read_only_upgrade_preserves_origins_not_completion(self):
-        old, raw = self.install_legacy()
-        before = {f: f.read_bytes() for f in self.root.rglob("*") if f.is_file()}
-        plan = p.migration_plan(self.root)
-        self.assertEqual(plan["stages"][5]["candidate_stages"], [5])
-        self.assertFalse(plan["stages"][5]["inherits_completed"])
-        self.assertEqual(before, {f: f.read_bytes() for f in self.root.rglob("*") if f.is_file()})
-        data = p.upgrade(self.root, plan["source_sha256"], "人工转录：授权升级fixture", 6)
-        self.assertEqual(data["workflow_id"], WORKFLOW)
-        self.assertEqual(data["stages"][5]["stage_id"], "turnaround")
-        self.assertEqual(data["stages"][5]["status"], "pending")
-        self.assertTrue(all(s["status"] != "completed" for s in data["stages"]))
-        self.assertIsNone(data["selected_concept_id"])
-        self.assertEqual(data["decisions"], [])
-        self.assertEqual(data["assets"][0]["path"], old["assets"][0]["path"])
-        self.assertEqual(data["assets"][0]["workflow_id"], LEGACY_WORKFLOW)
-        self.assertEqual(data["assets"][0]["legacy_origin"]["stage"], 6)
-        self.assertEqual(data["stage_history"][0]["workflow_id"], LEGACY_WORKFLOW)
-        self.assertEqual((self.root / data["migration"]["backup"]).read_bytes(), raw)
-        self.assertFalse((self.root / "stages/06-三视图").exists())
-        # Existing legacy final export remains consumable after upgrade, with explicit origin.
-        report = export.export_project(self.root, self.parent / "migrated-export", [old["assets"][0]["id"]])
-        self.assertEqual(report["assets"][0]["workflow_id"], LEGACY_WORKFLOW)
-        with self.assertRaisesRegex(p.ProjectError, "已是 schema 2"):
-            p.upgrade(self.root, plan["source_sha256"], "fixture", 6)
-        self.assertEqual(len(list(self.root.glob("*.bak"))), 1)
+    def test_same_character_document_materials_complete_research_with_human_evidence(self):
+        self.document()
+        material = self.checkpoint(role="research_materials", number=2, obj="materials")
+        approval = self.decision("stage", "research_imagination", outcomes=["asset:" + material["id"]])
+        self.update(lambda r, d: p.set_stage(d, 2, "fixture only", "completed", approval["id"]))
+        self.assertEqual(self.state()["stages"][1]["status"], "completed")
+        self.assertEqual(len(self.state()["documents"]), 1)
+        # Same document supports exploration; materials do not approve that stage.
+        self.checkpoint(role="character_exploration", number=4, obj="exploration")
+        with self.assertRaises(p.ProjectError):
+            self.update(lambda r, d: p.set_stage(d, 4, "invalid", "completed", approval["id"]))
+        self.assertNotEqual(self.state()["stages"][3]["status"], "completed")
 
-    def test_upgrade_missing_authorization_stale_digest_revision_no_write(self):
-        _, raw = self.install_legacy()
-        digest = hashlib.sha256(raw).hexdigest()
-        for sha, auth, rev in ((digest, "", 6), ("0" * 64, "yes", 6), (digest, "yes", 5)):
-            with self.assertRaises(p.ProjectError):
-                p.upgrade(self.root, sha, auth, rev)
-            self.assertEqual((self.root / p.STATE).read_bytes(), raw)
-            self.assertEqual(list(self.root.glob("*.bak")), [])
+    def test_research_requires_materials_and_snapshot_and_visual_binding(self):
+        self.document()
+        unrelated = self.checkpoint(role="character_exploration", number=2, obj="unrelated")
+        with self.assertRaisesRegex(p.ProjectError, "必要成果"):
+            self.decision("stage", "research_imagination", outcomes=["asset:" + unrelated["id"]])
+        path = self.file("previews/materials.png")
+        self.update(lambda r, d: p.record(r, d, path, 2, "final", "fixture", role="research_materials", document_id="doc"))
+        working = self.state()["assets"][-1]
+        with self.assertRaisesRegex(p.ProjectError, "确认快照"):
+            self.decision("stage", "research_imagination", outcomes=["asset:" + working["id"]])
+        self.update(lambda r, d: p.record(r, d, self.file("checkpoints/unbound/v1/image.png"), 2,
+                                          "final", "fixture", object_id="unbound", version="v1",
+                                          kind="checkpoint", role="research_materials"))
+        unbound = self.state()["assets"][-1]
+        with self.assertRaisesRegex(p.ProjectError, "视觉成果"):
+            self.decision("stage", "research_imagination", outcomes=["asset:" + unbound["id"]])
+        self.assertEqual(self.state()["decisions"], [])
 
-    def test_T19_failed_upgrade_keeps_old_and_non_overwritten_backups(self):
-        _, raw = self.install_legacy()
-        digest = hashlib.sha256(raw).hexdigest()
-        with patch.object(p.os, "replace", side_effect=OSError("injected full disk")):
-            with self.assertRaisesRegex(p.ProjectError, "backup="):
-                p.upgrade(self.root, digest, "fixture authorization", 6)
-        self.assertEqual((self.root / p.STATE).read_bytes(), raw)
-        backups = list(self.root.glob("*.bak"))
-        self.assertEqual(len(backups), 1)
-        self.assertEqual(backups[0].read_bytes(), raw)
-        p.upgrade(self.root, digest, "retry after inspecting state", 6)
-        self.assertEqual(len(list(self.root.glob("*.bak"))), 2)
-        self.assertEqual(backups[0].read_bytes(), raw)
-
-    def test_existing_backup_name_never_overwritten_even_on_collision(self):
-        _, raw = self.install_legacy()
-        token = uuid.UUID("12345678-1234-4234-8234-123456789012")
-        backup = self.root / ("project_state.schema1-fixed-" + str(token) + ".json.bak")
-        backup.write_bytes(b"keep existing backup")
-        with patch.object(p, "datetime") as clock, patch.object(p.uuid, "uuid4", return_value=token):
-            clock.now.return_value.strftime.return_value = "fixed"
-            clock.now.return_value.isoformat.return_value = "fixture-time"
-            with self.assertRaisesRegex(p.ProjectError, "升级未确认"):
-                p.upgrade(self.root, hashlib.sha256(raw).hexdigest(), "fixture", 6)
-        self.assertEqual(backup.read_bytes(), b"keep existing backup")
-        self.assertEqual((self.root / p.STATE).read_bytes(), raw)
-
-    def test_migration_external_editor_conflict_retains_backup_and_user_change(self):
-        _, raw = self.install_legacy()
-        actual = p.atomic_write
-        def raced(root, data, previous):
-            (root / p.STATE).write_bytes(raw + b" ")
-            return actual(root, data, previous)
-        with patch.object(p, "atomic_write", side_effect=raced):
-            with self.assertRaisesRegex(p.ProjectError, "已改变"):
-                p.upgrade(self.root, hashlib.sha256(raw).hexdigest(), "fixture", 6)
-        self.assertEqual((self.root / p.STATE).read_bytes(), raw + b" ")
-        self.assertEqual(list(self.root.glob("*.bak"))[0].read_bytes(), raw)
+    def test_independent_research_board_remains_a_valid_optional_document(self):
+        self.document("ideation")
+        material = self.checkpoint(role="research_board", number=2, obj="board")
+        approval = self.decision("stage", "research_imagination", outcomes=["asset:" + material["id"]])
+        self.update(lambda r, d: p.set_stage(d, 2, "fixture only", "completed", approval["id"]))
+        self.assertEqual(self.state()["stages"][1]["status"], "completed")
 
     def test_T03_T20_many_light_ideas_split_merge_selection_and_scoped_rejection(self):
         for i in range(20):
@@ -308,7 +249,7 @@ class WorkflowProjectTests(unittest.TestCase):
         script = self.parent / "standalone" / "cwb.py"
         script.parent.mkdir()
         shutil.copyfile(ROOT / "core/cwb.py", script)
-        commands = ("init", "status", "migration-plan", "upgrade", "idea", "document", "decision", "record", "stage", "edit")
+        commands = ("init", "status", "idea", "document", "decision", "record", "stage", "edit")
         for command in commands:
             result = subprocess.run([sys.executable, str(script), "project", command, "--help"],
                                     env={**os.environ, "CWB_WF_DIR": str(self.parent / "absent-workflow")},
@@ -366,6 +307,28 @@ class WorkflowStageTests(unittest.TestCase):
                 self.assertEqual(self.fake.posts, before)
                 self.assertTrue(all(g["id"].endswith("-reopen") for g in self.data()["groups"].values()))
 
+    def test_unsupported_sidecar_versions_do_not_call_services_or_rewrite(self):
+        self.execute()
+        original = self.data()
+        calls = len(self.fake.calls)
+        for version in (0, 1, 3, True, "2"):
+            with self.subTest(version=version):
+                raw = json.dumps({**original, "schema_version": version}).encode()
+                self.sidecar.write_bytes(raw)
+                with self.assertRaises(stage.StageError):
+                    self.execute()
+                self.assertEqual(self.sidecar.read_bytes(), raw)
+                self.assertEqual(len(self.fake.calls), calls)
+
+    def test_research_then_exploration_share_character_canvas_without_duplicate_groups(self):
+        result = self.execute(2)
+        self.assertIn("character/10_参考", result["groups"])
+        self.assertIn("character/20_探索/拼贴原型", result["groups"])
+        posts = self.fake.posts
+        self.assertEqual(self.execute(4)["created"], [])
+        self.assertEqual(self.execute(5)["created"], [])
+        self.assertEqual(self.fake.posts, posts)
+
     def test_T04_unregistered_same_name_and_ambiguous_markers_not_adopted(self):
         self.fake.add("30_主稿", kind="paintlayer")
         with self.assertRaisesRegex(stage.StageError, "同名"):
@@ -380,16 +343,6 @@ class WorkflowStageTests(unittest.TestCase):
             self.execute()
         self.assertEqual(self.fake.posts, before)
 
-    def test_legacy_sidecar_uses_frozen_keys_new_context_rejected(self):
-        stage.execute(6, self.doc, self.sidecar, self.fake.request)
-        data = self.data()
-        self.assertIn("6/Paintover", data["groups"])
-        self.assertEqual(stage.validate(data), data)
-        before = self.sidecar.read_bytes(), self.fake.posts
-        with self.assertRaisesRegex(stage.StageError, "冲突"):
-            self.execute(6, "turnaround")
-        self.assertEqual((self.sidecar.read_bytes(), self.fake.posts), before)
-        self.assertEqual(stage.execute(6, self.doc, self.sidecar, self.fake.request)["created"], [])
 
     def test_T19_new_sidecar_partial_failure_keeps_pending_never_retries(self):
         self.fake.fail_at, self.fake.mode = 2, "after"
@@ -430,7 +383,7 @@ class WorkflowStageTests(unittest.TestCase):
         self.assertEqual(self.data()["schema_version"], 2)
 
     def test_incompatible_role_or_workflow_fails_before_service(self):
-        for number, workflow, role in ((6, WORKFLOW, "character"), (4, "unknown", "character"), (4, LEGACY_WORKFLOW, "character")):
+        for number, workflow, role in ((6, WORKFLOW, "character"), (4, "unknown", "character"), (4, "unsupported", "character")):
             with self.assertRaises(stage.StageError):
                 self.execute(number, role, workflow)
         self.assertEqual(self.fake.calls, [])

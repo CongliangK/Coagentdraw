@@ -76,7 +76,7 @@ class ProjectTests(unittest.TestCase):
         self.assertEqual(state["assets"][0]["category"], "final")
         self.assertEqual(status["asset_checks"][0]["status"], "ok")
         self.assertEqual((self.root / path).read_bytes(), b"original editable art")
-        self.assertFalse(any((self.root / project.stage_dir(i)).exists() for i in range(2, 9)))
+        self.assertFalse((self.root / "documents").exists())
         self.assertEqual(state["schema_version"], 2)
 
     def test_repeated_initialization_and_calls_are_noops(self):
@@ -208,7 +208,7 @@ class ProjectTests(unittest.TestCase):
             with self.assertRaises(KeyboardInterrupt):
                 project.initialize(root, "new")
         self.assertFalse((root / "stages").exists())
-        asset = root / project.stage_dir(1) / "existing.kra"
+        asset = root / "documents" / "existing.kra"
         asset.parent.mkdir(parents=True)
         asset.write_bytes(b"untouched")
         project.initialize(root, "new")
